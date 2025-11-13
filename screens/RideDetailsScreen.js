@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, ActivityIndicator, Alert, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from '../components/Toast';
 
@@ -40,6 +40,11 @@ export default function RideDetailsScreen({ route, navigation }) {
   };
 
   const mapBookingStatus = (apiStatus, actualPickupTime, actualDropTime) => {
+    // Check for No-Show status first
+    if (apiStatus === 'No-Show') {
+      return 'no-show';
+    }
+    
     if (apiStatus === 'Completed' && actualDropTime) {
       return 'dropped';
     }
@@ -84,11 +89,21 @@ export default function RideDetailsScreen({ route, navigation }) {
             : b
         ));
       } else {
-        showToastMessage(data.message || 'Invalid OTP', 'error');
+        // Close modal first, then show error toast
+        setShowOtpModal(false);
+        setOtp('');
+        setTimeout(() => {
+          showToastMessage(data.message || 'Invalid OTP', 'error');
+        }, 300);
       }
     } catch (error) {
       console.error('OTP verification error:', error);
-      showToastMessage('Failed to verify OTP', 'error');
+      // Close modal first, then show error toast
+      setShowOtpModal(false);
+      setOtp('');
+      setTimeout(() => {
+        showToastMessage('Failed to verify OTP', 'error');
+      }, 300);
     } finally {
       setSubmittingOtp(false);
     }
@@ -277,16 +292,30 @@ export default function RideDetailsScreen({ route, navigation }) {
         </View>
 
         <View style={styles.locationContainer}>
-          <View style={styles.locationRow}>
-            <Text style={styles.locationIcon}>📍</Text>
-            <View style={styles.locationDetails}>
-              <Text style={styles.locationLabel}>
-                {routeData.log_type === 'IN' ? 'Pickup Location' : 'Drop Location'}
-              </Text>
-              <Text style={styles.locationText} numberOfLines={2}>
-                {routeData.log_type === 'IN' ? booking.pickup_location : booking.drop_location}
-              </Text>
+          <View style={styles.locationRowWithNav}>
+            <View style={styles.locationMainContent}>
+              <Text style={styles.locationIcon}>📍</Text>
+              <View style={styles.locationDetails}>
+                <Text style={styles.locationLabel}>
+                  {routeData.log_type === 'IN' ? 'Pickup Location' : 'Drop Location'}
+                </Text>
+                <Text style={styles.locationText} numberOfLines={2}>
+                  {routeData.log_type === 'IN' ? booking.pickup_location : booking.drop_location}
+                </Text>
+              </View>
             </View>
+            {(isPicked || isPending) && (
+              <TouchableOpacity
+                style={styles.navigateIconButton}
+                onPress={() => handleNavigate(booking)}
+              >
+                <Image 
+                  source={require('../assets/navigator.png')} 
+                  style={styles.navigatorIcon}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            )}
           </View>
 
           {(booking.estimated_pick_up_time || booking.actual_pick_up_time) && (
@@ -337,20 +366,12 @@ export default function RideDetailsScreen({ route, navigation }) {
           )}
 
           {isPicked && (
-            <>
-              <TouchableOpacity
-                style={styles.navigateButton}
-                onPress={() => handleNavigate(booking)}
-              >
-                <Text style={styles.navigateButtonText}>🗺️ Navigate</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.dropButton}
-                onPress={() => handleDrop(booking)}
-              >
-                <Text style={styles.dropButtonText}>✓ Mark Drop</Text>
-              </TouchableOpacity>
-            </>
+            <TouchableOpacity
+              style={styles.dropButtonFull}
+              onPress={() => handleDrop(booking)}
+            >
+              <Text style={styles.dropButtonText}>✓ Mark as Dropped</Text>
+            </TouchableOpacity>
           )}
 
           {isDropped && (
@@ -371,14 +392,6 @@ export default function RideDetailsScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      <Toast 
-        message={toastMessage}
-        type={toastType}
-        visible={showToast}
-        onHide={() => setShowToast(false)}
-        duration={3000}
-      />
-
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Text style={styles.backIcon}>←</Text>
@@ -506,13 +519,6 @@ export default function RideDetailsScreen({ route, navigation }) {
               ))}
             </View>
 
-            <TouchableOpacity 
-              style={styles.clearButton} 
-              onPress={clearOtp}
-            >
-              <Text style={styles.clearButtonText}>Clear</Text>
-            </TouchableOpacity>
-
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.cancelButton}
@@ -544,6 +550,14 @@ export default function RideDetailsScreen({ route, navigation }) {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <Toast 
+        message={toastMessage}
+        type={toastType}
+        visible={showToast}
+        onHide={() => setShowToast(false)}
+        duration={3000}
+      />
     </View>
   );
 }
@@ -752,10 +766,17 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
   },
-  locationRow: {
+  locationRowWithNav: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    justifyContent: 'space-between',
     marginBottom: 8,
+  },
+  locationMainContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginRight: 8,
   },
   locationIcon: {
     fontSize: 14,
@@ -777,6 +798,24 @@ const styles = StyleSheet.create({
     color: '#2d3436',
     lineHeight: 18,
     fontWeight: '500',
+  },
+  navigateIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#e74c3c',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#e74c3c',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  navigatorIcon: {
+    width: 24,
+    height: 24,
+    tintColor: '#fff',
   },
   timingRow: {
     flexDirection: 'row',
@@ -823,22 +862,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: 'bold',
   },
-  navigateButton: {
-    flex: 1,
-    backgroundColor: '#0984e3',
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  navigateButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
   dropButton: {
     flex: 1,
     backgroundColor: '#00b894',
     paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  dropButtonFull: {
+    flex: 1,
+    backgroundColor: '#00b894',
+    paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
   },
@@ -925,7 +959,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 24,
   },
   otpBox: {
     width: 56,
@@ -943,17 +977,6 @@ const styles = StyleSheet.create({
     borderColor: '#6C63FF',
     backgroundColor: '#f0f0ff',
     transform: [{ scale: 1.05 }],
-  },
-  clearButton: {
-    alignSelf: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
-  clearButtonText: {
-    fontSize: 14,
-    color: '#6C63FF',
-    fontWeight: '600',
   },
   modalButtons: {
     flexDirection: 'row',
@@ -996,3 +1019,4 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
+
