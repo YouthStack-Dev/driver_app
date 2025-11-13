@@ -5,13 +5,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen({ navigation }) {
   const [tenantId, setTenantId] = useState('SAM001');
-  const [username, setUsername] = useState('emp2@emp.com');
-  const [password, setPassword] = useState('Employee@123');
+  const [username, setUsername] = useState('john@ex1ample.clllhq');
+  const [password, setPassword] = useState('StrongPassword123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleLogin = async () => {
-    console.log('=== Login Attempt Started ===');
+    console.log('=== Driver Login Attempt Started ===');
     setError('');
     setLoading(true);
     
@@ -20,13 +20,13 @@ export default function LoginScreen({ navigation }) {
       console.log('Login result:', result);
       
       if (result.success) {
-        console.log('✓ Login successful, storing token');
+        console.log('✓ Driver login successful, storing token');
         await AsyncStorage.setItem('access_token', result.access_token);
         await AsyncStorage.setItem('tenant_id', tenantId);
-        if (result.employee_id) {
-          await AsyncStorage.setItem('employee_id', result.employee_id.toString());
+        if (result.driver_id) {
+          await AsyncStorage.setItem('driver_id', result.driver_id.toString());
         }
-        navigation.replace('Schedules');
+        navigation.replace('Rides');
       } else {
         console.log('✗ Login failed:', result.error);
         setError(result.error);
@@ -36,13 +36,13 @@ export default function LoginScreen({ navigation }) {
       setError('Unexpected error occurred: ' + err.message);
     } finally {
       setLoading(false);
-      console.log('=== Login Attempt Ended ===');
+      console.log('=== Driver Login Attempt Ended ===');
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Log In</Text>
+      <Text style={styles.title}>Driver Login</Text>
       <TextInput style={styles.input} placeholder="Tenant ID" value={tenantId} onChangeText={setTenantId} />
       <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
       <TextInput style={styles.input} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />

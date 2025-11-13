@@ -1,6 +1,7 @@
 export const BASE_URL = 'https://api.gocab.tech';
 export const API_ENDPOINTS = {
-  LOGIN: '/api/v1/auth/employee/login',
+  LOGIN: '/api/v1/auth/driver/login',
+  DRIVER_TRIPS: '/api/v1/driver/trips',
   BOOKINGS: '/api/v1/bookings/employee',
   BOOKING_DETAILS: '/api/v1/bookings', // Will be used as /api/v1/bookings/{booking_id}
   WEEKOFF_CONFIG: '/api/v1/weekoff-configs',

@@ -5,7 +5,7 @@ export async function login({ tenantId, username, password }) {
   try {
     const loginUrl = `${BASE_URL}${API_ENDPOINTS.LOGIN}`;
     
-    console.log('=== Login Request ===');
+    console.log('=== Driver Login Request ===');
     console.log('Tenant ID:', tenantId);
     console.log('Username:', username);
     console.log('API URL:', loginUrl);
@@ -19,24 +19,24 @@ export async function login({ tenantId, username, password }) {
     
     const res = await axios.post(loginUrl, payload);
     
-    console.log('=== Login Response ===');
+    console.log('=== Driver Login Response ===');
     console.log('Status:', res.status);
     console.log('Response data:', JSON.stringify(res.data, null, 2));
     
     const accessToken = res?.data?.data?.access_token;
     if (accessToken) {
       console.log('✓ Access token received');
-      // Store additional user data
+      // Store driver-specific data
       const userData = res?.data?.data;
-      const employeeId = userData?.user?.employee?.employee_id;
+      const driverId = userData?.user?.driver?.driver_id;
       
-      console.log('Employee ID:', employeeId);
-      console.log('User data:', JSON.stringify(userData?.user?.employee, null, 2));
+      console.log('Driver ID:', driverId);
+      console.log('Driver data:', JSON.stringify(userData?.user?.driver, null, 2));
       
       return { 
         success: true, 
         access_token: accessToken,
-        employee_id: employeeId,
+        driver_id: driverId,
         tenant_id: tenantId,
         user_data: userData
       };

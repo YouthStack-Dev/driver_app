@@ -3,11 +3,13 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import LoginScreen from '../screens/LoginScreen';
 import HomeScreen from '../screens/HomeScreen';
-import SchedulesScreen from '../screens/SchedulesScreen';
+import RidesScreen from '../screens/RidesScreen';
 import CreateBookingScreen from '../screens/CreateBookingScreen';
 import SelectShiftScreen from '../screens/SelectShiftScreen';
 import BookingSuccessScreen from '../screens/BookingSuccessScreen';
 import BookingDetailsScreen from '../screens/BookingDetailsScreen';
+import RideDetailsScreen from '../screens/RideDetailsScreen';
+import MapsScreen from '../screens/MapsScreen';
 
 const Stack = createStackNavigator();
 
@@ -21,8 +23,18 @@ export default function AppNavigator() {
           options={{ headerShown: false }}
         />
         <Stack.Screen 
-          name="Schedules" 
-          component={SchedulesScreen}
+          name="Rides" 
+          component={RidesScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="RideDetails" 
+          component={RideDetailsScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="Maps" 
+          component={MapsScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen 
