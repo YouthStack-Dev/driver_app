@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "e3550c89-779b-42b7-81f3-0be805003df4"
+      }
+    },
+    "android": {
+      "package": "com.mk_mk_mk.myappproject"
+    },
+    "ios": {
+      "bundleIdentifier": "com.mk-mk-mk.myappproject"
+    }
+  }
+}
