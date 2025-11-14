@@ -1,14 +1,9 @@
-import axios from 'axios';
+import api from './apiClient';
 import { BASE_URL, API_ENDPOINTS } from '../constants/config';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export async function getDriverTrips({ statusFilter = 'upcoming', bookingDate = null }) {
   try {
-    const token = await AsyncStorage.getItem('access_token');
-    
-    if (!token) {
-      return { success: false, error: 'No authentication token found' };
-    }
+    // token and Authorization header are attached automatically by `apiClient`
 
     // Format date as YYYY-MM-DD if not provided
     let dateParam = bookingDate;
@@ -30,12 +25,7 @@ export async function getDriverTrips({ statusFilter = 'upcoming', bookingDate = 
     console.log('Current Device Date (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
     console.log('Timezone Offset:', new Date().getTimezoneOffset(), 'minutes');
     
-    const res = await axios.get(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'accept': 'application/json',
-      },
-    });
+    const res = await api.get(url);
     
     console.log('Driver Trips Response:', JSON.stringify(res.data, null, 2));
     

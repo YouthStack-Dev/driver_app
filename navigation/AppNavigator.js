@@ -10,12 +10,19 @@ import BookingSuccessScreen from '../screens/BookingSuccessScreen';
 import BookingDetailsScreen from '../screens/BookingDetailsScreen';
 import RideDetailsScreen from '../screens/RideDetailsScreen';
 import MapsScreen from '../screens/MapsScreen';
+import NavigationService from './NavigationService';
+import sessionService from '../services/sessionService';
 
 const Stack = createStackNavigator();
 
 export default function AppNavigator() {
+  React.useEffect(() => {
+    // initialize session checks (schedules expiry handling if a token exists)
+    sessionService.init();
+  }, []);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={NavigationService.navigationRef}>
       <Stack.Navigator initialRouteName="Login">
         <Stack.Screen 
           name="Login" 

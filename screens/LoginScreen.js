@@ -20,12 +20,8 @@ export default function LoginScreen({ navigation }) {
       console.log('Login result:', result);
       
       if (result.success) {
-        console.log('✓ Driver login successful, storing token');
-        await AsyncStorage.setItem('access_token', result.access_token);
-        await AsyncStorage.setItem('tenant_id', tenantId);
-        if (result.driver_id) {
-          await AsyncStorage.setItem('driver_id', result.driver_id.toString());
-        }
+        console.log('✓ Driver login successful');
+        // sessionService.setSession was called inside authService.login
         navigation.replace('Rides');
       } else {
         console.log('✗ Login failed:', result.error);

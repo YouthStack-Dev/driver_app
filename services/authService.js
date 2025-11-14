@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { BASE_URL, API_ENDPOINTS } from '../constants/config';
+import sessionService from './sessionService';
 
 export async function login({ tenantId, username, password }) {
   try {
@@ -29,16 +30,23 @@ export async function login({ tenantId, username, password }) {
       // Store driver-specific data
       const userData = res?.data?.data;
       const driverId = userData?.user?.driver?.driver_id;
-      
+
       console.log('Driver ID:', driverId);
       console.log('Driver data:', JSON.stringify(userData?.user?.driver, null, 2));
-      
-      return { 
-        success: true, 
+
+      // Persist session so app can restore it and react to expiry
+      try {
+        await sessionService.setSession({ access_token: accessToken, user_data: userData });
+      } catch (e) {
+        console.log('Error saving session:', e?.message || e);
+      }
+
+      return {
+        success: true,
         access_token: accessToken,
         driver_id: driverId,
         tenant_id: tenantId,
-        user_data: userData
+        user_data: userData,
       };
     } else {
       console.log('✗ Token missing in response');
