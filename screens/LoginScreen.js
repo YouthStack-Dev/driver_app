@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, ActivityIndicator } from 'react-native';
 import { login } from '../services/authService'; // call auth service
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen({ navigation }) {
-  const [tenantId, setTenantId] = useState('SAM001');
-  const [username, setUsername] = useState('john@ex1ample.clllhq');
+  const [licenseNumber, setLicenseNumber] = useState('LC123456');
   const [password, setPassword] = useState('StrongPassword123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -16,13 +14,17 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
     
     try {
-      const result = await login({ tenantId, username, password });
+      const result = await login({ license_number: licenseNumber, password });
       console.log('Login result:', result);
       
       if (result.success) {
         console.log('✓ Driver login successful');
-        // sessionService.setSession was called inside authService.login
-        navigation.replace('Rides');
+        // New flow: authService stores a short-lived `temp_token` and accounts in temp-session.
+        // If multiple accounts were returned, navigate to account selection screen.
+        const accounts = result.accounts || [];
+        // Always go to SelectAccount so the app can confirm temp_token -> access_token.
+        // SelectAccount will auto-confirm when there's only one account returned.
+        navigation.navigate('SelectAccount');
       } else {
         console.log('✗ Login failed:', result.error);
         setError(result.error);
@@ -39,8 +41,7 @@ export default function LoginScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Driver Login</Text>
-      <TextInput style={styles.input} placeholder="Tenant ID" value={tenantId} onChangeText={setTenantId} />
-      <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} />
+      <TextInput style={styles.input} placeholder="License Number (DL) or Username" value={licenseNumber} onChangeText={setLicenseNumber} />
       <TextInput style={styles.input} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />
       {loading ? <ActivityIndicator size="large" /> : <Button title="Log In" onPress={handleLogin} />}
       {error !== '' && <Text style={styles.error}>{error}</Text>}

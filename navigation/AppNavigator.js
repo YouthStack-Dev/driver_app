@@ -4,6 +4,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import LoginScreen from '../screens/LoginScreen';
 import HomeScreen from '../screens/HomeScreen';
 import RidesScreen from '../screens/RidesScreen';
+import SelectAccountScreen from '../screens/SelectAccountScreen';
 import CreateBookingScreen from '../screens/CreateBookingScreen';
 import SelectShiftScreen from '../screens/SelectShiftScreen';
 import BookingSuccessScreen from '../screens/BookingSuccessScreen';
@@ -33,6 +34,11 @@ export default function AppNavigator() {
           name="Rides" 
           component={RidesScreen}
           options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="SelectAccount"
+          component={SelectAccountScreen}
+          options={{ title: 'Select Account' }}
         />
         <Stack.Screen 
           name="RideDetails" 

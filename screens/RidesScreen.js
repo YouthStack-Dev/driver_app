@@ -44,10 +44,12 @@ export default function RidesScreen({ navigation }) {
 
   useFocusEffect(
     React.useCallback(() => {
+      // Re-fetch routes when screen is focused. Include `selectedTab` so
+      // we request the correct category (upcoming/ongoing/completed)
       if (driverId) {
         fetchRoutes(selectedTab);
       }
-    }, [driverId])
+    }, [driverId, selectedTab])
   );
 
   const loadDriverIdAndRoutes = async () => {

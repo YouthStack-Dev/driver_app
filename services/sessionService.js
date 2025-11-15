@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import NavigationService from '../navigation/NavigationService';
 
 const SESSION_KEY = 'user_session';
+const TEMP_SESSION_KEY = 'temp_login_session';
 
 let expiryTimeout = null;
 
@@ -55,6 +56,39 @@ async function setSession({ access_token, user_data }) {
 
   await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
   scheduleExpiryCheck(session);
+}
+
+async function setTempSession({ temp_token, driver, accounts }) {
+  if (!temp_token) return;
+  const session = {
+    temp_token,
+    driver: driver || null,
+    accounts: accounts || [],
+    createdAt: Date.now(),
+  };
+  await AsyncStorage.setItem(TEMP_SESSION_KEY, JSON.stringify(session));
+}
+
+async function getTempSession() {
+  const raw = await AsyncStorage.getItem(TEMP_SESSION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function clearTempSession() {
+  await AsyncStorage.removeItem(TEMP_SESSION_KEY);
+}
+
+async function setTempSelection(account) {
+  // persist selected account on temp session so the app can continue
+  const s = await getTempSession();
+  if (!s) throw new Error('No temp session');
+  const updated = { ...s, selected_account: account };
+  await AsyncStorage.setItem(TEMP_SESSION_KEY, JSON.stringify(updated));
 }
 
 async function getSession() {
@@ -115,4 +149,8 @@ export default {
   getSession,
   clearSession,
   init,
+  setTempSession,
+  getTempSession,
+  clearTempSession,
+  setTempSelection,
 };

@@ -1,3 +1,20 @@
+# Driver App
+
+Example: test new login endpoint with curl
+
+```bash
+curl --location 'http://localhost:8000/api/v1/auth/driver/new/login' \
+--header 'accept: application/json' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer <your-jwt-here>' \
+--data '{
+   "license_number": "LIC1234561ulqaaaa",
+   "password": "StrongPassword123"
+}'
+```
+
+In the app you can call `login({ license_number, password, authToken })` — `authToken` is optional.
+
 # My App Project - Employee Cab Booking App
 
 A React Native app built with Expo for employee cab booking and schedule management.

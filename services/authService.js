@@ -2,57 +2,56 @@ import axios from 'axios';
 import { BASE_URL, API_ENDPOINTS } from '../constants/config';
 import sessionService from './sessionService';
 
-export async function login({ tenantId, username, password }) {
+export async function login({ license_number, password, authToken } = {}) {
   try {
-    const loginUrl = `${BASE_URL}${API_ENDPOINTS.LOGIN}`;
+    // New backend expects license_number + password at /api/v1/auth/driver/new/login
+    const loginUrl = `${BASE_URL}${API_ENDPOINTS.NEW_LOGIN}`;
     
     console.log('=== Driver Login Request ===');
-    console.log('Tenant ID:', tenantId);
-    console.log('Username:', username);
+    console.log('License number:', license_number);
     console.log('API URL:', loginUrl);
     
     const payload = {
-      tenant_id: tenantId,
-      username,
+      license_number: license_number,
       password,
     };
     console.log('Request payload:', JSON.stringify(payload, null, 2));
     
-    const res = await axios.post(loginUrl, payload);
+    const headers = {};
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+    const res = await axios.post(loginUrl, payload, { headers });
     
     console.log('=== Driver Login Response ===');
     console.log('Status:', res.status);
     console.log('Response data:', JSON.stringify(res.data, null, 2));
     
-    const accessToken = res?.data?.data?.access_token;
-    if (accessToken) {
-      console.log('✓ Access token received');
-      // Store driver-specific data
-      const userData = res?.data?.data;
-      const driverId = userData?.user?.driver?.driver_id;
+    // New flow: backend returns a temporary token and list of accounts
+    const data = res?.data?.data || {};
+    const tempToken = data?.temp_token || data?.token || null;
+    const accounts = data?.accounts || [];
+    const driver = data?.driver || null;
 
-      console.log('Driver ID:', driverId);
-      console.log('Driver data:', JSON.stringify(userData?.user?.driver, null, 2));
-
-      // Persist session so app can restore it and react to expiry
+    if (tempToken) {
+      console.log('✓ Temp token received');
       try {
-        await sessionService.setSession({ access_token: accessToken, user_data: userData });
+        // store temp-session separately; final access token will be obtained after account selection
+        await sessionService.setTempSession({ temp_token: tempToken, driver, accounts });
       } catch (e) {
-        console.log('Error saving session:', e?.message || e);
+        console.log('Error saving temp session:', e?.message || e);
       }
 
       return {
         success: true,
-        access_token: accessToken,
-        driver_id: driverId,
-        tenant_id: tenantId,
-        user_data: userData,
+        temp_token: tempToken,
+        accounts,
+        driver,
       };
-    } else {
-      console.log('✗ Token missing in response');
-      console.log('Full response structure:', JSON.stringify(res.data, null, 2));
-      return { success: false, error: 'Token missing in response.' };
     }
+
+    console.log('✗ Temp token missing in response');
+    console.log('Full response structure:', JSON.stringify(res.data, null, 2));
+    return { success: false, error: 'Token missing in response.' };
   } catch (err) {
     console.log('=== Login Error ===');
     console.log('Error message:', err.message);
@@ -98,4 +97,79 @@ export async function login({ tenantId, username, password }) {
       return { success: false, error: 'Network error. Please check your connection.' };
     }
   }
+}
+
+export async function confirmLogin({ temp_token, vendor_id, tenant_id, authToken, retries = 2 } = {}) {
+  const url = `${BASE_URL}${API_ENDPOINTS.LOGIN_CONFIRM}`;
+  const payload = { temp_token, vendor_id, tenant_id };
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+  let attempt = 0;
+  let lastError = null;
+
+  while (attempt <= retries) {
+    try {
+      console.log('=== Confirm Login Request ===', { attempt });
+      console.log('URL:', url);
+      console.log('Payload:', payload);
+
+      const res = await axios.post(url, payload, { headers });
+
+      console.log('=== Confirm Login Response ===');
+      console.log('Status:', res.status);
+      console.log('Response data:', JSON.stringify(res.data, null, 2));
+
+      const data = res?.data?.data || {};
+      const accessToken = data?.access_token || data?.token || null;
+
+      if (accessToken) {
+        console.log('✓ Access token received from confirm');
+        try {
+          await sessionService.setSession({ access_token: accessToken, user_data: data });
+          await sessionService.clearTempSession();
+        } catch (e) {
+          console.log('Error saving final session:', e?.message || e);
+        }
+
+        return {
+          success: true,
+          access_token: accessToken,
+          user_data: data,
+        };
+      }
+
+      return { success: false, error: 'Confirm: access token missing in response.' };
+    } catch (err) {
+      attempt += 1;
+      lastError = err;
+      // extract server error code/message if present
+      const resp = err?.response;
+      const serverData = resp?.data || {};
+      const errorCode = serverData?.code || serverData?.error_code || serverData?.detail?.code || null;
+      const errorMessage = (serverData && (serverData.message || serverData.error || serverData.detail)) || err.message || 'Confirm login failed.';
+
+      // If we've exhausted attempts, return the extracted error
+      if (attempt > retries) {
+        return { success: false, error: errorMessage, errorCode };
+      }
+
+      // Retry on network errors or 5xx responses
+      const status = resp?.status || 0;
+      const isRetryable = !resp || status >= 500 || status === 0;
+      if (!isRetryable) {
+        return { success: false, error: errorMessage, errorCode };
+      }
+
+      // exponential backoff before retrying
+      const backoffMs = 300 * Math.pow(2, attempt - 1);
+      console.log(`Confirm login attempt ${attempt} failed, retrying in ${backoffMs}ms...`);
+      await new Promise((r) => setTimeout(r, backoffMs));
+      continue;
+    }
+  }
+
+  // fallback
+  return { success: false, error: lastError?.message || 'Confirm login failed.' };
 }
