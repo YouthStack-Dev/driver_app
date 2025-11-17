@@ -55,6 +55,32 @@ async function setSession({ access_token, user_data }) {
   };
 
   await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  // Backwards compatibility: some screens/services expect raw keys in AsyncStorage
+  try {
+    await AsyncStorage.setItem('access_token', access_token);
+
+    // Try to extract common ids from returned user_data to satisfy legacy callers
+    const ud = user_data || {};
+    // driver_id: check several possible shapes
+    const driverId = ud.driver_id || (ud.user && ud.user.driver && ud.user.driver.driver_id) || (ud.user && ud.user.driver_id) || (ud.driver && ud.driver.driver_id) || null;
+    if (driverId !== null && typeof driverId !== 'undefined') {
+      await AsyncStorage.setItem('driver_id', String(driverId));
+    }
+
+    // tenant_id / vendor_id
+    const tenantId = ud.tenant_id || (ud.account && ud.account.tenant_id) || (ud.user && ud.user.tenant_id) || (ud.user && ud.user.driver && ud.user.driver.tenant_id) || null;
+    if (tenantId) {
+      await AsyncStorage.setItem('tenant_id', String(tenantId));
+    }
+
+    const vendorId = ud.vendor_id || (ud.account && ud.account.vendor_id) || (ud.user && ud.user.driver && ud.user.driver.vendor_id) || null;
+    if (vendorId !== null && typeof vendorId !== 'undefined') {
+      await AsyncStorage.setItem('vendor_id', String(vendorId));
+    }
+  } catch (e) {
+    // ignore storage errors but don't fail session set
+    console.log('Warning: failed to write legacy session keys', e?.message || e);
+  }
   scheduleExpiryCheck(session);
 }
 
@@ -107,6 +133,15 @@ async function clearSession() {
     expiryTimeout = null;
   }
   await AsyncStorage.removeItem(SESSION_KEY);
+  // clear legacy keys too
+  try {
+    await AsyncStorage.removeItem('access_token');
+    await AsyncStorage.removeItem('driver_id');
+    await AsyncStorage.removeItem('tenant_id');
+    await AsyncStorage.removeItem('vendor_id');
+  } catch (e) {
+    // ignore
+  }
 }
 
 function scheduleExpiryCheck(session) {
