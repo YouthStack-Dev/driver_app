@@ -340,28 +340,24 @@ export default function RidesScreen({ navigation }) {
       </Animated.View>
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={toggleDrawer} style={styles.menuButton}>
-          <View style={styles.menuIcon}>
-            <View style={styles.menuLine} />
-            <View style={styles.menuLine} />
-            <View style={styles.menuLine} />
-          </View>
-        </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <Text style={styles.title}>My Rides</Text>
-          <TouchableOpacity 
-            style={styles.dateSelector}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <Text style={styles.dateIcon}>📅</Text>
-            <Text style={styles.dateText}>{formatDisplayDate(selectedDate)}</Text>
-            <Text style={styles.dropdownIcon}>▼</Text>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity onPress={toggleDrawer} style={styles.menuButton}>
+            <View style={styles.menuIcon}>
+              <View style={styles.menuLine} />
+              <View style={styles.menuLine} />
+              <View style={styles.menuLine} />
+            </View>
           </TouchableOpacity>
+          <Text style={styles.title}>My Rides</Text>
         </View>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-          <View style={styles.logoutIcon}>
-            <Text style={styles.logoutIconText}>⎋</Text>
-          </View>
+        
+        <TouchableOpacity 
+          style={styles.dateSelector}
+          onPress={() => setShowDatePicker(true)}
+        >
+          <Text style={styles.dateIcon}>📅</Text>
+          <Text style={styles.dateText}>{formatDisplayDate(selectedDate)}</Text>
+          <Text style={styles.dropdownIcon}>▼</Text>
         </TouchableOpacity>
       </View>
 
@@ -529,84 +525,93 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   menuButton: {
-    padding: 10,
-    marginRight: 10,
+    padding: 8,
+    marginRight: 12,
   },
   menuIcon: {
-    width: 26,
-    height: 20,
+    width: 28,
+    height: 22,
     justifyContent: 'space-between',
   },
   menuLine: {
     height: 3,
+    width: '100%',
     backgroundColor: '#fff',
     borderRadius: 2,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
     paddingTop: 50,
-    paddingBottom: 15,
+    paddingBottom: 16,
     backgroundColor: '#6C63FF',
     borderBottomLeftRadius: 25,
     borderBottomRightRadius: 25,
     shadowColor: '#6C63FF',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 3,
+    shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerContent: {
     flex: 1,
+    marginHorizontal: 12,
   },
   title: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 8,
   },
   dateSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    alignSelf: 'flex-start',
+    paddingVertical: 7,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   dateIcon: {
-    fontSize: 16,
-    marginRight: 8,
+    fontSize: 15,
+    marginRight: 7,
   },
   dateText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
-    marginRight: 6,
+    marginRight: 5,
   },
   dropdownIcon: {
     color: '#fff',
     fontSize: 10,
   },
   logoutButton: {
-    padding: 8,
+    padding: 4,
   },
   logoutIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.4)',
   },
   logoutIconText: {
-    fontSize: 20,
+    fontSize: 18,
     color: '#fff',
     fontWeight: 'bold',
   },
