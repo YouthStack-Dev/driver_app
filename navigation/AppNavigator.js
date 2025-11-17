@@ -5,6 +5,7 @@ import LoginScreen from '../screens/LoginScreen';
 import HomeScreen from '../screens/HomeScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import RidesScreen from '../screens/RidesScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 import SelectAccountScreen from '../screens/SelectAccountScreen';
 import SwitchAccountScreen from '../screens/SwitchAccountScreen';
 import CreateBookingScreen from '../screens/CreateBookingScreen';
@@ -41,6 +42,16 @@ export default function AppNavigator() {
           name="Rides" 
           component={RidesScreen}
           options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="Profile" 
+          component={ProfileScreen}
+          options={{ 
+            title: 'My Profile',
+            headerStyle: { backgroundColor: '#6C63FF' },
+            headerTintColor: '#fff',
+            headerTitleStyle: { fontWeight: 'bold' },
+          }}
         />
         <Stack.Screen 
           name="SelectAccount"

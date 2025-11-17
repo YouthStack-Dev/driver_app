@@ -321,7 +321,7 @@ export default function RidesScreen({ navigation }) {
           <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); navigation.navigate('Dashboard'); }}>
             <Text style={styles.drawerItemText}>🏠 Home</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); }}>
+          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); navigation.navigate('Profile'); }}>
             <Text style={styles.drawerItemText}>👤 Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); }}>
