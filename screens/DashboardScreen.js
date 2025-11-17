@@ -75,15 +75,10 @@ export default function DashboardScreen({ navigation }) {
         </View>
         
         <View style={styles.drawerContent}>
-          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); }}>
-            <Text style={styles.drawerItemText}>🏠 Home</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); navigation.navigate('Profile'); }}>
             <Text style={styles.drawerItemText}>👤 Profile</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); }}>
-            <Text style={styles.drawerItemText}>⚙️ Settings</Text>
-          </TouchableOpacity>
+
           <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); navigation.navigate('Rides'); }}>
             <Text style={styles.drawerItemText}>🚗 My Rides</Text>
           </TouchableOpacity>
