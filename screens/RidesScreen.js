@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Animated, Dimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDriverTrips } from '../services/routeService';
 import Toast from '../components/Toast';
@@ -19,6 +19,8 @@ export default function RidesScreen({ navigation }) {
   const [selectedTab, setSelectedTab] = useState('upcoming');
   const [selectedDate, setSelectedDate] = useState(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerAnimation = useState(new Animated.Value(-280))[0];
 
   const tabs = [
     { 
@@ -41,6 +43,14 @@ export default function RidesScreen({ navigation }) {
   useEffect(() => {
     loadDriverIdAndRoutes();
   }, []);
+
+  useEffect(() => {
+    Animated.timing(drawerAnimation, {
+      toValue: drawerOpen ? 0 : -280,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  }, [drawerOpen]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -119,6 +129,14 @@ export default function RidesScreen({ navigation }) {
     await AsyncStorage.removeItem('access_token');
     await AsyncStorage.removeItem('driver_id');
     navigation.replace('Login');
+  };
+
+  const toggleDrawer = () => {
+    setDrawerOpen(!drawerOpen);
+  };
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
   };
 
   const formatTime = (timeStr) => {
@@ -276,7 +294,59 @@ export default function RidesScreen({ navigation }) {
         duration={3000}
       />
 
+      {/* Overlay */}
+      {drawerOpen && (
+        <TouchableOpacity 
+          style={styles.overlay} 
+          activeOpacity={1} 
+          onPress={closeDrawer}
+        />
+      )}
+
+      {/* Sidebar Drawer */}
+      <Animated.View 
+        style={[
+          styles.drawer,
+          { transform: [{ translateX: drawerAnimation }] }
+        ]}
+      >
+        <View style={styles.drawerHeader}>
+          <Text style={styles.drawerTitle}>MLT</Text>
+          <TouchableOpacity onPress={closeDrawer} style={styles.closeButton}>
+            <Text style={styles.closeButtonText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+        
+        <View style={styles.drawerContent}>
+          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); navigation.navigate('Dashboard'); }}>
+            <Text style={styles.drawerItemText}>🏠 Home</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); }}>
+            <Text style={styles.drawerItemText}>👤 Profile</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); }}>
+            <Text style={styles.drawerItemText}>⚙️ Settings</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); }}>
+            <Text style={styles.drawerItemText}>🚗 My Rides</Text>
+          </TouchableOpacity>
+          
+          <View style={styles.drawerDivider} />
+          
+          <TouchableOpacity style={[styles.drawerItem, styles.logoutItem]} onPress={() => { closeDrawer(); handleLogout(); }}>
+            <Text style={[styles.drawerItemText, styles.logoutText]}>🚪 Log Out</Text>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+
       <View style={styles.header}>
+        <TouchableOpacity onPress={toggleDrawer} style={styles.menuButton}>
+          <View style={styles.menuIcon}>
+            <View style={styles.menuLine} />
+            <View style={styles.menuLine} />
+            <View style={styles.menuLine} />
+          </View>
+        </TouchableOpacity>
         <View style={styles.headerContent}>
           <Text style={styles.title}>My Rides</Text>
           <TouchableOpacity 
@@ -382,6 +452,95 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f7fa',
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 998,
+  },
+  drawer: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 280,
+    backgroundColor: '#fff',
+    zIndex: 999,
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  drawerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    paddingTop: 50,
+    backgroundColor: '#6C63FF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  drawerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  closeButton: {
+    padding: 8,
+  },
+  closeButtonText: {
+    fontSize: 24,
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  drawerContent: {
+    flex: 1,
+    paddingTop: 10,
+  },
+  drawerItem: {
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  drawerItemText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  drawerDivider: {
+    height: 1,
+    backgroundColor: '#ddd',
+    marginVertical: 10,
+  },
+  logoutItem: {
+    marginTop: 'auto',
+    borderBottomWidth: 0,
+    backgroundColor: '#fff5f5',
+  },
+  logoutText: {
+    color: '#d9534f',
+    fontWeight: '600',
+  },
+  menuButton: {
+    padding: 10,
+    marginRight: 10,
+  },
+  menuIcon: {
+    width: 26,
+    height: 20,
+    justifyContent: 'space-between',
+  },
+  menuLine: {
+    height: 3,
+    backgroundColor: '#fff',
+    borderRadius: 2,
   },
   header: {
     flexDirection: 'row',
