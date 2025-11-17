@@ -333,6 +333,10 @@ export default function RidesScreen({ navigation }) {
           
           <View style={styles.drawerDivider} />
           
+          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); navigation.navigate('SwitchAccount'); }}>
+            <Text style={styles.drawerItemText}>🔄 Switch Company</Text>
+          </TouchableOpacity>
+          
           <TouchableOpacity style={[styles.drawerItem, styles.logoutItem]} onPress={() => { closeDrawer(); handleLogout(); }}>
             <Text style={[styles.drawerItemText, styles.logoutText]}>🚪 Log Out</Text>
           </TouchableOpacity>

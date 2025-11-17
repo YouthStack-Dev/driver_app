@@ -3,8 +3,10 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import LoginScreen from '../screens/LoginScreen';
 import HomeScreen from '../screens/HomeScreen';
+import DashboardScreen from '../screens/DashboardScreen';
 import RidesScreen from '../screens/RidesScreen';
 import SelectAccountScreen from '../screens/SelectAccountScreen';
+import SwitchAccountScreen from '../screens/SwitchAccountScreen';
 import CreateBookingScreen from '../screens/CreateBookingScreen';
 import SelectShiftScreen from '../screens/SelectShiftScreen';
 import BookingSuccessScreen from '../screens/BookingSuccessScreen';
@@ -31,6 +33,11 @@ export default function AppNavigator() {
           options={{ headerShown: false }}
         />
         <Stack.Screen 
+          name="Dashboard" 
+          component={DashboardScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
           name="Rides" 
           component={RidesScreen}
           options={{ headerShown: false }}
@@ -39,6 +46,16 @@ export default function AppNavigator() {
           name="SelectAccount"
           component={SelectAccountScreen}
           options={{ title: 'Select Account' }}
+        />
+        <Stack.Screen 
+          name="SwitchAccount"
+          component={SwitchAccountScreen}
+          options={{ 
+            title: 'Switch Company',
+            headerStyle: { backgroundColor: '#6C63FF' },
+            headerTintColor: '#fff',
+            headerTitleStyle: { fontWeight: 'bold' },
+          }}
         />
         <Stack.Screen 
           name="RideDetails" 
