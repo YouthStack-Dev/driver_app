@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Animated, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Animated, Dimensions, BackHandler, Alert, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDriverTrips } from '../services/routeService';
 import Toast from '../components/Toast';
 import CalendarPicker from '../components/CalendarPicker';
 import { useFocusEffect } from '@react-navigation/native';
 import sessionService from '../services/sessionService';
+import overlayService from '../services/overlayService';
 
 export default function RidesScreen({ navigation }) {
   const [routes, setRoutes] = useState([]);
@@ -21,6 +22,7 @@ export default function RidesScreen({ navigation }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [hasOverlayPermission, setHasOverlayPermission] = useState(false);
   const drawerAnimation = useState(new Animated.Value(-280))[0];
 
   const tabs = [
@@ -43,6 +45,89 @@ export default function RidesScreen({ navigation }) {
 
   useEffect(() => {
     loadDriverIdAndRoutes();
+    checkOverlayPermission();
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    // Check overlay permission periodically
+    const intervalId = setInterval(async () => {
+      await checkOverlayPermission();
+    }, 3000); // Check every 3 seconds
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const checkOverlayPermission = async () => {
+    const hasPermission = await overlayService.checkPermission();
+    setHasOverlayPermission(hasPermission);
+    
+    if (!hasPermission) {
+      requestOverlayPermission();
+    }
+  };
+
+  const requestOverlayPermission = () => {
+    Alert.alert(
+      '⚠️ Overlay Permission Required',
+      'This app requires permission to display a floating icon when running in the background. This is MANDATORY to use the app and helps you return quickly while using maps or other apps.',
+      [
+        {
+          text: 'Grant Permission',
+          onPress: async () => {
+            await overlayService.requestPermission();
+            // Recheck after a delay to see if permission was granted
+            setTimeout(async () => {
+              const granted = await overlayService.checkPermission();
+              if (!granted) {
+                // User didn't grant permission, ask again
+                setTimeout(() => requestOverlayPermission(), 1000);
+              } else {
+                setHasOverlayPermission(true);
+              }
+            }, 1000);
+          }
+        },
+        {
+          text: 'Exit App',
+          onPress: () => BackHandler.exitApp(),
+          style: 'destructive'
+        }
+      ],
+      { cancelable: false }
+    );
+  };
+
+  const handleAppStateChange = async (nextAppState) => {
+    if (nextAppState === 'background' || nextAppState === 'inactive') {
+      // App going to background - show overlay
+      await overlayService.showOverlay();
+    } else if (nextAppState === 'active') {
+      // App coming to foreground - hide overlay
+      await overlayService.hideOverlay();
+    }
+  };
+
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      Alert.alert(
+        'Exit App',
+        'Are you sure you want to exit?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Exit', onPress: () => BackHandler.exitApp() }
+        ]
+      );
+      return true; // Prevent default back behavior
+    });
+
+    return () => backHandler.remove();
   }, []);
 
   useEffect(() => {
@@ -283,6 +368,36 @@ export default function RidesScreen({ navigation }) {
       </TouchableOpacity>
     );
   };
+
+  // Block app usage if overlay permission not granted
+  if (!hasOverlayPermission) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.centerContainer}>
+          <Text style={styles.permissionIcon}>⚠️</Text>
+          <Text style={styles.permissionTitle}>Permission Required</Text>
+          <Text style={styles.permissionText}>
+            This app requires overlay permission to display a floating icon when in background.
+          </Text>
+          <Text style={styles.permissionSubtext}>
+            This is mandatory to use the app. Please grant the permission to continue.
+          </Text>
+          <TouchableOpacity 
+            style={styles.permissionButton}
+            onPress={requestOverlayPermission}
+          >
+            <Text style={styles.permissionButtonText}>Grant Permission</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.exitButton}
+            onPress={() => BackHandler.exitApp()}
+          >
+            <Text style={styles.exitButtonText}>Exit App</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -855,5 +970,60 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#6C63FF',
     fontWeight: 'bold',
+  },
+  permissionIcon: {
+    fontSize: 80,
+    marginBottom: 20,
+  },
+  permissionTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2d3436',
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  permissionText: {
+    fontSize: 16,
+    color: '#636e72',
+    textAlign: 'center',
+    marginBottom: 10,
+    paddingHorizontal: 30,
+    lineHeight: 24,
+  },
+  permissionSubtext: {
+    fontSize: 14,
+    color: '#d63031',
+    textAlign: 'center',
+    marginBottom: 30,
+    paddingHorizontal: 30,
+    fontWeight: '600',
+  },
+  permissionButton: {
+    backgroundColor: '#6C63FF',
+    paddingHorizontal: 40,
+    paddingVertical: 15,
+    borderRadius: 25,
+    marginBottom: 15,
+    shadowColor: '#6C63FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  permissionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  exitButton: {
+    backgroundColor: '#dfe6e9',
+    paddingHorizontal: 40,
+    paddingVertical: 15,
+    borderRadius: 25,
+  },
+  exitButtonText: {
+    color: '#2d3436',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
