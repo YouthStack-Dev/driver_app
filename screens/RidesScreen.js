@@ -5,6 +5,7 @@ import { getDriverTrips } from '../services/routeService';
 import Toast from '../components/Toast';
 import CalendarPicker from '../components/CalendarPicker';
 import { useFocusEffect } from '@react-navigation/native';
+import sessionService from '../services/sessionService';
 
 export default function RidesScreen({ navigation }) {
   const [routes, setRoutes] = useState([]);
@@ -126,8 +127,7 @@ export default function RidesScreen({ navigation }) {
   };
 
   const handleLogout = async () => {
-    await AsyncStorage.removeItem('access_token');
-    await AsyncStorage.removeItem('driver_id');
+    await sessionService.clearSession();
     navigation.replace('Login');
   };
 

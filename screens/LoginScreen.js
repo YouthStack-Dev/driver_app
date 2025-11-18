@@ -1,12 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, ActivityIndicator } from 'react-native';
-import { login } from '../services/authService'; // call auth service
+import { login } from '../services/authService';
+import sessionService from '../services/sessionService';
 
 export default function LoginScreen({ navigation }) {
   const [licenseNumber, setLicenseNumber] = useState('LC123456');
   const [password, setPassword] = useState('StrongPassword123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    checkExistingSession();
+  }, []);
+
+  const checkExistingSession = async () => {
+    try {
+      console.log('🔍 Checking for existing session...');
+      const session = await sessionService.getSession();
+      
+      if (session && session.access_token) {
+        console.log('✅ Valid session found, navigating to Rides');
+        navigation.replace('Rides');
+        return;
+      }
+      
+      console.log('ℹ️ No valid session found, showing login screen');
+    } catch (error) {
+      console.log('⚠️ Error checking session:', error.message);
+    } finally {
+      setCheckingSession(false);
+    }
+  };
 
   const handleLogin = async () => {
     console.log('=== Driver Login Attempt Started ===');
@@ -38,6 +63,16 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // Show loading while checking for existing session
+  if (checkingSession) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#6C63FF" />
+        <Text style={styles.checkingText}>Checking session...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Driver Login</Text>
@@ -53,6 +88,11 @@ const styles = StyleSheet.create({
   container: { flex:1, justifyContent:'center', alignItems:'center', backgroundColor:'#f9f9f9', paddingHorizontal:20 },
   title: { fontSize:28, fontWeight:'bold', marginBottom:30 },
   input: { width:'100%', height:50, borderColor:'#ccc', borderWidth:1, borderRadius:8, paddingHorizontal:15, marginBottom:15, fontSize:16, backgroundColor:'#fff' },
+  checkingText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: '#666',
+  },
   error: { 
     color:'red', 
     marginTop:10, 

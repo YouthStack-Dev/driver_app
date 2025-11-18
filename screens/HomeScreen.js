@@ -1,10 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, Button } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import sessionService from '../services/sessionService';
 
 export default function HomeScreen({ navigation }) {
   const handleLogout = async () => {
-    await AsyncStorage.removeItem('access_token');
+    await sessionService.clearSession();
     navigation.replace('Login');
   };
 
