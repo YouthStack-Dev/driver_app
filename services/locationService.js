@@ -3,6 +3,8 @@ import { LOCATION_CONFIG } from '../constants/config';
 import firebaseService from './firebaseService';
 import httpFirebaseService from './httpFirebaseService';
 import sessionService from './sessionService';
+import locationPermissionService from './locationPermissionService';
+import { Alert } from 'react-native';
 
 class LocationService {
   constructor() {
@@ -10,50 +12,122 @@ class LocationService {
     this.locationSubscription = null;
     this.lastKnownLocation = null;
     this.updateInterval = null;
+    this.permissionMonitoringActive = false;
+    this.onPermissionLost = null;
+    
+    // Initialize permission monitoring
+    this.initializePermissionMonitoring();
   }
 
   /**
-   * Request location permissions
+   * Initialize permission monitoring
+   */
+  async initializePermissionMonitoring() {
+    try {
+      await locationPermissionService.initialize((permissionStatus) => {
+        this.handlePermissionChange(permissionStatus);
+      });
+      this.permissionMonitoringActive = true;
+      console.log('✅ Location permission monitoring initialized');
+    } catch (error) {
+      console.error('❌ Failed to initialize permission monitoring:', error);
+    }
+  }
+
+  /**
+   * Handle permission changes
+   */
+  handlePermissionChange(permissionStatus) {
+    console.log('🔄 Location permission status changed:', permissionStatus);
+    
+    if (!permissionStatus.hasAll && this.isTracking) {
+      console.log('⚠️ Location permissions lost, stopping tracking');
+      this.stopLocationTracking();
+      
+      // Show alert to user
+      Alert.alert(
+        '📍 Location Access Lost',
+        'Location permissions were revoked. Location tracking has been stopped. Please grant permissions again to continue.',
+        [
+          { text: 'Later', style: 'cancel' },
+          { 
+            text: 'Grant Permission',
+            onPress: () => this.requestLocationPermissions()
+          }
+        ]
+      );
+      
+      // Notify callback if set
+      if (this.onPermissionLost) {
+        this.onPermissionLost(permissionStatus);
+      }
+    }
+  }
+
+  /**
+   * Set callback for permission lost events
+   */
+  setPermissionLostCallback(callback) {
+    this.onPermissionLost = callback;
+  }
+
+  /**
+   * Request location permissions using comprehensive service
    */
   async requestLocationPermissions() {
     try {
-      console.log('🔒 Requesting location permissions...');
+      console.log('🔒 Checking location permissions...');
       
-      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-      
-      if (foregroundStatus !== 'granted') {
-        console.log('❌ Foreground location permission denied');
-        return { success: false, error: 'Location permission denied' };
+      // Check if location services are enabled
+      const servicesEnabled = await locationPermissionService.checkLocationServicesEnabled();
+      if (!servicesEnabled) {
+        return { success: false, error: 'Location services disabled on device' };
       }
-
-      console.log('✅ Foreground location permission granted');
-
-      // Optional: Request background permissions for continuous tracking
-      const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
       
-      if (backgroundStatus !== 'granted') {
-        console.log('⚠️ Background location permission denied - will track only in foreground');
+      // Request permissions using the comprehensive service
+      const result = await locationPermissionService.checkAndRequestPermissions(true);
+      
+      if (!result.success) {
+        console.error('❌ Location permission request failed:', result.error);
+        return { success: false, error: result.error };
+      }
+      
+      const permissions = result.permissions;
+      
+      if (permissions.hasAll) {
+        console.log('✅ All location permissions granted');
+        return { success: true, background: true, foreground: true };
+      } else if (permissions.foreground.granted) {
+        console.log('⚠️ Only foreground permission available');
+        return { 
+          success: true, 
+          warning: 'Background location not available',
+          foreground: true,
+          background: false
+        };
       } else {
-        console.log('✅ Background location permission granted');
+        return { success: false, error: 'Location permissions denied' };
       }
-
-      return { 
-        success: true, 
-        foreground: foregroundStatus === 'granted',
-        background: backgroundStatus === 'granted'
-      };
     } catch (error) {
-      console.error('❌ Location permission error:', error);
+      console.error('❌ Error requesting permissions:', error);
       return { success: false, error: error.message };
     }
   }
 
   /**
-   * Get current location
+   * Get current location with permission validation
    */
   async getCurrentLocation() {
     try {
       console.log('📍 Getting current location...');
+      
+      // Validate permissions before getting location
+      const permissions = await locationPermissionService.getCurrentPermissionStatus();
+      if (!permissions.foreground.granted) {
+        console.log('❌ Location permission not available');
+        locationPermissionService.showFeatureBlockedAlert('location access');
+        return { success: false, error: 'Location permission required' };
+      }
       
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
@@ -78,7 +152,7 @@ class LocationService {
   }
 
   /**
-   * Start location tracking
+   * Start location tracking with comprehensive permission checks
    */
   async startLocationTracking() {
     try {
@@ -87,7 +161,16 @@ class LocationService {
         return { success: true, message: 'Already tracking' };
       }
 
-      // Check permissions
+      // First check current permission status without prompting
+      const currentPermissions = await locationPermissionService.getCurrentPermissionStatus();
+      
+      if (!currentPermissions.hasAll) {
+        console.log('❌ Insufficient location permissions for tracking');
+        locationPermissionService.showFeatureBlockedAlert('location tracking');
+        return { success: false, error: 'Location permissions required' };
+      }
+
+      // Double-check permissions with request if needed
       const permissionResult = await this.requestLocationPermissions();
       if (!permissionResult.success) {
         return permissionResult;

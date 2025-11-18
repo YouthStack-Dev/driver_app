@@ -28,6 +28,13 @@ A React Native app built with Expo for employee cab booking and schedule managem
 - 🔄 Real-time booking status tracking
 - ✕ Cancel pending bookings
 - 📱 Fully responsive mobile interface
+- 📍 **Location Tracking System**
+  - Automatic location permission management
+  - Real-time driver location tracking
+  - Firebase integration for location updates
+  - Background location support
+  - Permission monitoring and re-request
+  - Location status dashboard
 
 ## Prerequisites
 
@@ -254,7 +261,57 @@ Base URL: `https://api.gocab.tech`
 - `GET /api/v1/weekoff-configs/{employee_id}` - Get weekoff config
 - `GET /api/v1/shifts/` - Get active shifts
 
+## Location Tracking Features
+
+### Automatic Permission Management
+- **App Startup**: Location permissions are requested when the app first opens
+- **Permission Guard**: App won't start without location access
+- **Background Monitoring**: Continuously monitors permission status
+- **Auto Re-request**: Prompts user to grant permissions if revoked
+
+### Location Tracking System
+- **Firebase Integration**: Updates driver locations to Firebase Realtime Database
+- **Hierarchical Storage**: `/drivers/{tenant_id}/{vendor_id}/{driver_id}/`
+- **Auto-start**: Tracking begins automatically after successful login
+- **Manual Controls**: Start/stop tracking from dashboard
+- **Real-time Updates**: 30-second location updates
+
+### Permission Flow
+1. **App Launch**: Initial permission request with explanation
+2. **Permission Lost**: Automatic detection and re-request prompts
+3. **Settings Integration**: Direct links to app settings for manual permission grants
+4. **Feature Blocking**: Location features disabled without proper permissions
+
+### Dashboard Components
+- **LocationStatusCard**: Real-time permission and tracking status
+- **LocationTracker**: Manual tracking controls and status display
+- **Permission Alerts**: User-friendly permission request dialogs
+
 ## Configuration
+
+### Firebase Setup
+1. Update Firebase URL in `constants/config.js`
+2. Configure Firebase Realtime Database rules:
+```json
+{
+  "rules": {
+    "drivers": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}
+```
+
+### Location Configuration
+Edit `constants/config.js`:
+```javascript
+export const LOCATION_CONFIG = {
+  UPDATE_INTERVAL: 30000, // 30 seconds
+  ACCURACY: 'high',
+  DISTANCE_FILTER: 10, // meters
+};
+```
 
 ### Update API URL
 
