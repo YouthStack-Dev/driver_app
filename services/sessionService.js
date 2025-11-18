@@ -68,7 +68,7 @@ async function setSession({ access_token, user_data }) {
     }
 
     // tenant_id / vendor_id
-    const tenantId = ud.tenant_id || (ud.account && ud.account.tenant_id) || (ud.user && ud.user.tenant_id) || (ud.user && ud.user.driver && ud.user.driver.tenant_id) || null;
+    const tenantId = ud.tenant_id || (ud.account && ud.account.tenant_id) || (ud.user && ud.user.tenant_id) || (ud.user && ud.user.driver && ud.user.driver.tenant_id) || (ud.user && ud.user.tenant && ud.user.tenant.tenant_id) || null;
     if (tenantId) {
       await AsyncStorage.setItem('tenant_id', String(tenantId));
     }

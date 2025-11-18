@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Button, ScrollView, TouchableOpacity, Animated, Dimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import LocationTracker from '../components/LocationTracker';
+import logoutService from '../services/logoutService';
 
 const { width } = Dimensions.get('window');
 const DRAWER_WIDTH = 280;
@@ -36,8 +38,24 @@ export default function DashboardScreen({ navigation }) {
   };
 
   const handleLogout = async () => {
-    await AsyncStorage.removeItem('access_token');
-    navigation.replace('Login');
+    try {
+      console.log('🚪 Logout initiated from dashboard');
+      const result = await logoutService.logout();
+      
+      if (result.success) {
+        console.log('✅ Logout successful, navigating to login');
+        navigation.replace('Login');
+      } else {
+        console.log('⚠️ Logout warning:', result.error);
+        // Still navigate to login even if logout had issues
+        navigation.replace('Login');
+      }
+    } catch (error) {
+      console.error('❌ Logout error:', error);
+      // Fallback logout
+      await AsyncStorage.removeItem('access_token');
+      navigation.replace('Login');
+    }
   };
 
   const toggleDrawer = () => {
@@ -89,6 +107,10 @@ export default function DashboardScreen({ navigation }) {
             <Text style={styles.drawerItemText}>🔄 Switch Company</Text>
           </TouchableOpacity>
           
+          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); navigation.navigate('LocationTest'); }}>
+            <Text style={styles.drawerItemText}>🧪 Location Test</Text>
+          </TouchableOpacity>
+          
           <TouchableOpacity style={[styles.drawerItem, styles.logoutItem]} onPress={() => { closeDrawer(); handleLogout(); }}>
             <Text style={[styles.drawerItemText, styles.logoutText]}>🚪 Log Out</Text>
           </TouchableOpacity>
@@ -112,6 +134,9 @@ export default function DashboardScreen({ navigation }) {
 
         <Text style={styles.title}>Dashboard</Text>
         <Text style={styles.welcomeText}>Welcome to your dashboard!</Text>
+        
+        {/* Location Tracker Component */}
+        <LocationTracker />
         
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Quick Actions</Text>

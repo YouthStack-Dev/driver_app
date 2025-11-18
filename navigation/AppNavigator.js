@@ -14,6 +14,7 @@ import BookingSuccessScreen from '../screens/BookingSuccessScreen';
 import BookingDetailsScreen from '../screens/BookingDetailsScreen';
 import RideDetailsScreen from '../screens/RideDetailsScreen';
 import MapsScreen from '../screens/MapsScreen';
+import LocationTestScreen from '../screens/LocationTestScreen';
 import NavigationService from './NavigationService';
 import sessionService from '../services/sessionService';
 
@@ -110,6 +111,16 @@ export default function AppNavigator() {
           component={BookingDetailsScreen}
           options={{ 
             title: 'Booking Details',
+            headerStyle: { backgroundColor: '#6C63FF' },
+            headerTintColor: '#fff',
+            headerTitleStyle: { fontWeight: 'bold' },
+          }}
+        />
+        <Stack.Screen 
+          name="LocationTest" 
+          component={LocationTestScreen}
+          options={{ 
+            title: 'Location Testing',
             headerStyle: { backgroundColor: '#6C63FF' },
             headerTintColor: '#fff',
             headerTitleStyle: { fontWeight: 'bold' },

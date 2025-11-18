@@ -12,3 +12,23 @@ export const API_ENDPOINTS = {
   CREATE_BOOKING: '/api/v1/bookings',
   CANCEL_BOOKING: '/api/v1/bookings/cancel', // Will be used as /api/v1/bookings/cancel/{booking_id}
 };
+
+// Firebase Configuration
+export const FIREBASE_CONFIG = {
+  databaseURL: 'https://ets-1-ccb71-default-rtdb.firebaseio.com',
+  // For Firebase v9+ SDK, you might need additional config
+  // If you have a full Firebase config, add it here:
+  // apiKey: "your-api-key",
+  // authDomain: "your-project.firebaseapp.com",
+  // projectId: "your-project-id",
+  // storageBucket: "your-project.appspot.com",
+  // messagingSenderId: "123456789",
+  // appId: "1:123456789:web:abcdef"
+};
+
+// Location Tracking Configuration
+export const LOCATION_CONFIG = {
+  UPDATE_INTERVAL: 30000, // 30 seconds
+  ACCURACY: 'high', // high, balanced, low
+  DISTANCE_FILTER: 10, // minimum distance in meters to trigger update
+};

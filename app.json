@@ -1,15 +1,34 @@
 {
   "expo": {
+    "name": "Driver App",
+    "slug": "driver-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#6C63FF"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "bundleIdentifier": "com.mk-mk-mk.myappproject",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app needs access to location for driver tracking and navigation.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to location for driver tracking and navigation even when app is in background."
+      }
+    },
+    "android": {
+      "package": "com.mk_mk_mk.myappproject",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
+    },
     "extra": {
       "eas": {
         "projectId": "e3550c89-779b-42b7-81f3-0be805003df4"
       }
-    },
-    "android": {
-      "package": "com.mk_mk_mk.myappproject"
-    },
-    "ios": {
-      "bundleIdentifier": "com.mk-mk-mk.myappproject"
     }
   }
 }

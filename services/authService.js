@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { BASE_URL, API_ENDPOINTS } from '../constants/config';
 import sessionService from './sessionService';
+import locationService from './locationService';
 
 export async function login({ license_number, password, authToken } = {}) {
   try {
@@ -132,6 +133,21 @@ export async function confirmLogin({ temp_token, vendor_id, tenant_id, authToken
           
           await sessionService.setSession({ access_token: accessToken, user_data: finalUserData });
           await sessionService.clearTempSession();
+          
+          // Start location tracking after successful login
+          console.log('🚀 Starting location tracking after login...');
+          setTimeout(async () => {
+            try {
+              const trackingResult = await locationService.startLocationTracking();
+              if (trackingResult.success) {
+                console.log('✅ Location tracking started automatically');
+              } else {
+                console.log('⚠️ Could not start location tracking:', trackingResult.error);
+              }
+            } catch (error) {
+              console.log('⚠️ Location tracking start error:', error.message);
+            }
+          }, 2000); // Wait 2 seconds after login
         } catch (e) {
           console.log('Error saving final session:', e?.message || e);
         }
@@ -216,6 +232,21 @@ export async function switchCompany({ access_token, vendor_id, tenant_id } = {})
           access_token: newAccessToken, 
           user_data: finalUserData 
         });
+        
+        // Start location tracking after successful company switch
+        console.log('🚀 Starting location tracking after company switch...');
+        setTimeout(async () => {
+          try {
+            const trackingResult = await locationService.startLocationTracking();
+            if (trackingResult.success) {
+              console.log('✅ Location tracking started after company switch');
+            } else {
+              console.log('⚠️ Could not start location tracking:', trackingResult.error);
+            }
+          } catch (error) {
+            console.log('⚠️ Location tracking start error:', error.message);
+          }
+        }, 1000); // Wait 1 second after switch
       } catch (e) {
         console.log('Error saving switched session:', e?.message || e);
       }
