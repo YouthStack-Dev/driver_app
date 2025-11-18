@@ -49,7 +49,7 @@ export default function LoginScreen({ navigation }) {
         const accounts = result.accounts || [];
         // Always go to SelectAccount so the app can confirm temp_token -> access_token.
         // SelectAccount will auto-confirm when there's only one account returned.
-        navigation.navigate('SelectAccount');
+        navigation.replace('SelectAccount');
       } else {
         console.log('✗ Login failed:', result.error);
         setError(result.error);
