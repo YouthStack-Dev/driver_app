@@ -114,21 +114,25 @@ export default function RidesScreen({ navigation }) {
     }
   };
 
-  useEffect(() => {
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      Alert.alert(
-        'Exit App',
-        'Are you sure you want to exit?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Exit', onPress: () => BackHandler.exitApp() }
-        ]
-      );
-      return true; // Prevent default back behavior
-    });
+  useFocusEffect(
+    React.useCallback(() => {
+      // Add back button handler only when this screen is focused
+      const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+        Alert.alert(
+          'Exit App',
+          'Are you sure you want to exit?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Exit', onPress: () => BackHandler.exitApp() }
+          ]
+        );
+        return true; // Prevent default back behavior
+      });
 
-    return () => backHandler.remove();
-  }, []);
+      // Clean up when screen loses focus
+      return () => backHandler.remove();
+    }, [])
+  );
 
   useEffect(() => {
     Animated.timing(drawerAnimation, {
