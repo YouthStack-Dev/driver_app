@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Animated, Dimensions, BackHandler, Alert, AppState } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Animated, Dimensions, BackHandler, Alert, AppState, Modal, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getDriverTrips } from '../services/routeService';
+import * as Location from 'expo-location';
+import { getDriverTrips, startDuty, startTrip, endDuty, markNoShow, dropTrip } from '../services/routeService';
 import Toast from '../components/Toast';
-import CalendarPicker from '../components/CalendarPicker';
 import { useFocusEffect } from '@react-navigation/native';
 import sessionService from '../services/sessionService';
 import overlayService from '../services/overlayService';
@@ -18,34 +18,29 @@ export default function RidesScreen({ navigation }) {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('error');
-  const [selectedTab, setSelectedTab] = useState('upcoming');
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [hasOverlayPermission, setHasOverlayPermission] = useState(false);
+  const [startingDuty, setStartingDuty] = useState(null); // Track which route is starting duty
+  const [hasActiveDuty, setHasActiveDuty] = useState(false); // Track if driver has active ongoing duty
+  const [otpModalVisible, setOtpModalVisible] = useState(false);
+  const [otpValue, setOtpValue] = useState('');
+  const [currentBooking, setCurrentBooking] = useState(null);
+  const [currentRoute, setCurrentRoute] = useState(null);
+  const [processingPickup, setProcessingPickup] = useState(null);
+  const [processingNoShow, setProcessingNoShow] = useState(null);
+  const [processingDrop, setProcessingDrop] = useState(null);
+  const [dropOtpModalVisible, setDropOtpModalVisible] = useState(false);
+  const [dropOtpValue, setDropOtpValue] = useState('');
+  const [currentDropBooking, setCurrentDropBooking] = useState(null);
+  const [currentDropRoute, setCurrentDropRoute] = useState(null);
+  const [endDutyModalVisible, setEndDutyModalVisible] = useState(false);
+  const [endDutyReason, setEndDutyReason] = useState('');
+  const [routeToEnd, setRouteToEnd] = useState(null);
+  const [hasOverlayPermission, setHasOverlayPermission] = useState(true); // Set to true to skip overlay for Expo testing
   const drawerAnimation = useState(new Animated.Value(-280))[0];
-
-  const tabs = [
-    { 
-      key: 'upcoming', 
-      label: 'Upcoming', 
-      icon: '🚗'
-    },
-    { 
-      key: 'ongoing', 
-      label: 'Ongoing', 
-      icon: '🔄'
-    },
-    { 
-      key: 'completed', 
-      label: 'Completed', 
-      icon: '✓'
-    },
-  ];
 
   useEffect(() => {
     loadDriverIdAndRoutes();
-    checkOverlayPermission();
+    // checkOverlayPermission(); // Disabled for Expo testing
   }, []);
 
   useEffect(() => {
@@ -57,11 +52,12 @@ export default function RidesScreen({ navigation }) {
 
   useEffect(() => {
     // Check overlay permission periodically
-    const intervalId = setInterval(async () => {
-      await checkOverlayPermission();
-    }, 3000); // Check every 3 seconds
+    // Disabled for Expo testing
+    // const intervalId = setInterval(async () => {
+    //   await checkOverlayPermission();
+    // }, 3000);
 
-    return () => clearInterval(intervalId);
+    // return () => clearInterval(intervalId);
   }, []);
 
   const checkOverlayPermission = async () => {
@@ -103,15 +99,13 @@ export default function RidesScreen({ navigation }) {
       { cancelable: false }
     );
   };
-
   const handleAppStateChange = async (nextAppState) => {
-    if (nextAppState === 'background' || nextAppState === 'inactive') {
-      // App going to background - show overlay
-      await overlayService.showOverlay();
-    } else if (nextAppState === 'active') {
-      // App coming to foreground - hide overlay
-      await overlayService.hideOverlay();
-    }
+    // Overlay disabled for Expo testing
+    // if (nextAppState === 'background' || nextAppState === 'inactive') {
+    //   await overlayService.showOverlay();
+    // } else if (nextAppState === 'active') {
+    //   await overlayService.hideOverlay();
+    // }
   };
 
   useFocusEffect(
@@ -144,12 +138,11 @@ export default function RidesScreen({ navigation }) {
 
   useFocusEffect(
     React.useCallback(() => {
-      // Re-fetch routes when screen is focused. Include `selectedTab` so
-      // we request the correct category (upcoming/ongoing/completed)
+      // Re-fetch routes when screen is focused (will auto-detect ongoing/upcoming)
       if (driverId) {
-        fetchRoutes(selectedTab);
+        fetchRoutes();
       }
-    }, [driverId, selectedTab])
+    }, [driverId])
   );
 
   const loadDriverIdAndRoutes = async () => {
@@ -157,21 +150,28 @@ export default function RidesScreen({ navigation }) {
       const dId = await AsyncStorage.getItem('driver_id');
       if (dId) {
         setDriverId(dId);
-        // Set today's date in local timezone
-        const today = new Date();
-        const year = today.getFullYear();
-        const month = String(today.getMonth() + 1).padStart(2, '0');
-        const day = String(today.getDate()).padStart(2, '0');
-        const dateStr = `${year}-${month}-${day}`;
         
-        console.log('=== Date Info ===');
-        console.log('Local Date:', today.toLocaleString());
-        console.log('Selected Date String:', dateStr);
-        console.log('Timezone Offset (minutes):', today.getTimezoneOffset());
+        // Check if driver has any ongoing routes
+        const ongoingResult = await getDriverTrips({
+          statusFilter: 'ongoing',
+          bookingDate: null // ongoing ignores date
+        });
         
-        setSelectedDate(dateStr);
-        
-        await fetchRoutes(selectedTab, dateStr);
+        if (ongoingResult.success && ongoingResult.routes && ongoingResult.routes.length > 0) {
+          // Driver has active duty - show ongoing routes
+          console.log('Driver has active duty, showing ongoing route');
+          await AsyncStorage.setItem('has_active_duty', 'true');
+          setHasActiveDuty(true);
+          setRoutes(ongoingResult.routes);
+          setFilteredRoutes(ongoingResult.routes);
+          setLoading(false);
+        } else {
+          // No active duty - show upcoming routes
+          console.log('No active duty, showing upcoming routes');
+          await AsyncStorage.removeItem('has_active_duty');
+          setHasActiveDuty(false);
+          await fetchRoutes();
+        }
       } else {
         setError('Driver ID not found. Please login again.');
         setLoading(false);
@@ -183,34 +183,71 @@ export default function RidesScreen({ navigation }) {
     }
   };
 
-  const fetchRoutes = async (statusFilter, dateParam = null) => {
+  const fetchRoutes = async () => {
     setLoading(true);
     setError('');
     
-    const result = await getDriverTrips({
-      statusFilter: statusFilter,
-      bookingDate: dateParam || selectedDate
-    });
+    // Check duty status to determine what to fetch
+    const dutyStatus = await AsyncStorage.getItem('has_active_duty');
     
-    if (result.success) {
-      setRoutes(result.routes || []);
-      setFilteredRoutes(result.routes || []);
+    if (dutyStatus === 'true') {
+      // Fetch ongoing routes
+      const result = await getDriverTrips({
+        statusFilter: 'ongoing',
+        bookingDate: null
+      });
+      
+      if (result.success) {
+        if (result.routes && result.routes.length > 0) {
+          setRoutes(result.routes || []);
+          setFilteredRoutes(result.routes || []);
+          setHasActiveDuty(true);
+        } else {
+          // No ongoing routes found - duty must have ended
+          await AsyncStorage.removeItem('has_active_duty');
+          setHasActiveDuty(false);
+          // Fetch upcoming routes instead
+          await fetchUpcomingRoutes();
+          setLoading(false);
+          return;
+        }
+      } else {
+        setError(result.error);
+      }
     } else {
-      setError(result.error);
+      // Fetch today's upcoming routes
+      await fetchUpcomingRoutes();
     }
     
     setLoading(false);
   };
 
-  const handleTabChange = (tabKey) => {
-    setSelectedTab(tabKey);
-    fetchRoutes(tabKey);
+  const fetchUpcomingRoutes = async () => {
+    // Always fetch today's upcoming routes
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayDate = `${year}-${month}-${day}`;
+    
+    const result = await getDriverTrips({
+      statusFilter: 'upcoming',
+      bookingDate: todayDate
+    });
+    
+    if (result.success) {
+      setRoutes(result.routes || []);
+      setFilteredRoutes(result.routes || []);
+      setHasActiveDuty(false);
+    } else {
+      setError(result.error);
+    }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
     if (driverId) {
-      await fetchRoutes(selectedTab);
+      await fetchRoutes();
     }
     setRefreshing(false);
   };
@@ -242,118 +279,470 @@ export default function RidesScreen({ navigation }) {
     return timeStr;
   };
 
-  const formatDisplayDate = (dateStr) => {
-    if (!dateStr) return 'Select Date';
+  const handleStartDuty = async (route) => {
+    if (!route) return;
     
-    const date = new Date(dateStr + 'T00:00:00');
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    setStartingDuty(route.route_id);
     
-    const selectedDateObj = new Date(date);
-    selectedDateObj.setHours(0, 0, 0, 0);
-    
-    // Check if it's today
-    if (selectedDateObj.getTime() === today.getTime()) {
-      return 'Today';
+    try {
+      const result = await startDuty(route.route_id);
+      
+      if (result.success) {
+        // Set active duty status
+        await AsyncStorage.setItem('has_active_duty', 'true');
+        setHasActiveDuty(true);
+        
+        setToastMessage('Duty started successfully! Route is now ongoing.');
+        setToastType('success');
+        setShowToast(true);
+        
+        // Automatically switch to ongoing view by refreshing
+        await fetchRoutes();
+      } else {
+        // Handle specific error codes
+        if (result.errorCode === 'DRIVER_HAS_ONGOING_ROUTE') {
+          Alert.alert(
+            'Already On Duty',
+            `You already have an ongoing route (${result.details?.ongoing_route_code || 'Route'}). Please complete it before starting a new duty.`,
+            [
+              { text: 'OK', style: 'default' }
+            ]
+          );
+        } else if (result.errorCode === 'INVALID_ROUTE_STATE') {
+          setToastMessage(`Cannot start duty: ${result.error || 'Invalid route state'}`);
+          setToastType('error');
+          setShowToast(true);
+          // Refresh to get updated route status
+          await fetchRoutes();
+        } else {
+          setToastMessage(result.error || 'Failed to start duty');
+          setToastType('error');
+          setShowToast(true);
+        }
+      }
+    } catch (error) {
+      console.log('Error starting duty:', error);
+      setToastMessage('Network error. Please try again.');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setStartingDuty(null);
     }
-    
-    // Check if it's tomorrow
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    if (selectedDateObj.getTime() === tomorrow.getTime()) {
-      return 'Tomorrow';
-    }
-    
-    // Check if it's yesterday
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (selectedDateObj.getTime() === yesterday.getTime()) {
-      return 'Yesterday';
-    }
-    
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'short', 
-      month: 'short', 
-      day: 'numeric' 
-    });
   };
 
-  const handleDateSelect = (dateStr) => {
-    setSelectedDate(dateStr);
-    fetchRoutes(selectedTab, dateStr);
+  const navigateToAddress = (latitude, longitude, address) => {
+    if (!latitude || !longitude || !address) return;
+    
+    const encodedAddress = encodeURIComponent(address);
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&destination_place_id=${encodedAddress}`;
+    
+    Alert.alert(
+      'Open Navigation',
+      `Navigate to:\n${address}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Maps', onPress: () => {
+          // Open in browser or maps app
+          navigation.navigate('Maps', { 
+            latitude, 
+            longitude, 
+            address 
+          });
+        }}
+      ]
+    );
   };
+
+  const handlePickupPress = async (route, booking) => {
+    if (!route || !booking) return;
+    
+    // Check if OTP is required
+    if (booking.is_boarding_otp_required) {
+      setCurrentBooking(booking);
+      setCurrentRoute(route);
+      setOtpModalVisible(true);
+    } else {
+      await startPickup(route, booking, null);
+    }
+  };
+
+  const startPickup = async (route, booking, otp) => {
+    if (!route || !booking) return;
+    
+    setProcessingPickup(booking.booking_id);
+    
+    try {
+      // Get current location
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Location permission is required to start pickup.');
+        setProcessingPickup(null);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      const result = await startTrip({
+        routeId: route.route_id,
+        bookingId: booking.booking_id,
+        otp: otp,
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude
+      });
+
+      if (result.success) {
+        setToastMessage('Pickup started successfully!');
+        setToastType('success');
+        setShowToast(true);
+        
+        // Close OTP modal if open
+        setOtpModalVisible(false);
+        setOtpValue('');
+        
+        // Refresh routes to update status
+        await fetchRoutes();
+      } else {
+        // Handle specific errors
+        if (result.errorCode === 'ROUTE_NOT_ONGOING') {
+          Alert.alert('Duty Not Started', 'Please start duty first before picking up passengers.');
+        } else if (result.errorCode === 'PREVIOUS_PENDING_STOPS') {
+          Alert.alert(
+            'Previous Stops Pending',
+            `Complete ${result.details?.pending_count || 'previous'} stops first.`
+          );
+        } else if (result.errorCode === 'DRIVER_TOO_FAR_FROM_PICKUP') {
+          Alert.alert(
+            'Too Far from Pickup',
+            `You are ${Math.round(result.details?.distance_meters || 0)}m away. Move closer (max 500m allowed).`
+          );
+        } else if (result.errorCode === 'INVALID_BOARDING_OTP') {
+          Alert.alert('Invalid OTP', 'The OTP you entered is incorrect. Please try again.');
+          setOtpValue('');
+        } else {
+          setToastMessage(result.error || 'Failed to start pickup');
+          setToastType('error');
+          setShowToast(true);
+        }
+      }
+    } catch (error) {
+      console.log('Error starting pickup:', error);
+      setToastMessage('Failed to get location or start pickup');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setProcessingPickup(null);
+    }
+  };
+
+  const handleOtpSubmit = () => {
+    if (!otpValue || otpValue.length < 4) {
+      Alert.alert('Invalid OTP', 'Please enter a valid OTP');
+      return;
+    }
+    startPickup(currentRoute, currentBooking, otpValue);
+  };
+
+  const handleNoShowPress = async (route, booking) => {
+    if (!route || !booking) return;
+    
+    Alert.alert(
+      'Mark as No Show',
+      `Are you sure you want to mark ${booking.employee_name || 'this passenger'} as No Show?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark No Show',
+          style: 'destructive',
+          onPress: () => markPassengerNoShow(route, booking)
+        }
+      ]
+    );
+  };
+
+  const markPassengerNoShow = async (route, booking) => {
+    if (!route || !booking) return;
+    
+    setProcessingNoShow(booking.booking_id);
+
+    try {
+      const result = await markNoShow({
+        routeId: route.route_id,
+        bookingId: booking.booking_id,
+        reason: 'Passenger did not show up'
+      });
+
+      if (result.success) {
+        setToastMessage('Passenger marked as No Show');
+        setToastType('success');
+        setShowToast(true);
+
+        // Refresh routes to update status
+        await fetchRoutes();
+      } else {
+        setToastMessage(result.error || 'Failed to mark as No Show');
+        setToastType('error');
+        setShowToast(true);
+      }
+    } catch (error) {
+      console.log('Error marking no show:', error);
+      setToastMessage('Failed to mark as No Show');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setProcessingNoShow(null);
+    }
+  };
+
+  const handleDropPress = async (route, booking) => {
+    if (!route || !booking) return;
+    
+    // Check if OTP is required for drop
+    if (booking.is_deboarding_otp_required) {
+      setCurrentDropBooking(booking);
+      setCurrentDropRoute(route);
+      setDropOtpModalVisible(true);
+    } else {
+      await dropPassenger(route, booking, null);
+    }
+  };
+
+  const dropPassenger = async (route, booking, otp) => {
+    if (!route || !booking) return;
+    
+    setProcessingDrop(booking.booking_id);
+    
+    try {
+      // Get current location
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Location permission is required to drop passenger.');
+        setProcessingDrop(null);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      const result = await dropTrip({
+        routeId: route.route_id,
+        bookingId: booking.booking_id,
+        otp: otp,
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude
+      });
+
+      if (result.success) {
+        setToastMessage('Passenger dropped successfully!');
+        setToastType('success');
+        setShowToast(true);
+        
+        // Close OTP modal if open
+        setDropOtpModalVisible(false);
+        setDropOtpValue('');
+        
+        // Refresh routes to update status
+        await fetchRoutes();
+      } else {
+        // Handle specific errors
+        if (result.errorCode === 'DRIVER_TOO_FAR_FROM_DROP') {
+          Alert.alert(
+            'Too Far from Drop Location',
+            `You are ${Math.round(result.details?.distance_meters || 0)}m away. Move closer (max 500m allowed).`
+          );
+        } else if (result.errorCode === 'INVALID_DEBOARDING_OTP') {
+          Alert.alert('Invalid OTP', 'The OTP you entered is incorrect. Please try again.');
+          setDropOtpValue('');
+        } else if (result.errorCode === 'ROUTE_NOT_FOUND_OR_INVALID_STATE') {
+          Alert.alert('Error', 'Route not found or not in valid state.');
+        } else {
+          setToastMessage(result.error || 'Failed to drop passenger');
+          setToastType('error');
+          setShowToast(true);
+        }
+      }
+    } catch (error) {
+      console.log('Error dropping passenger:', error);
+      setToastMessage('Failed to get location or drop passenger');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setProcessingDrop(null);
+    }
+  };
+
+  const handleDropOtpSubmit = () => {
+    if (!dropOtpValue || dropOtpValue.length < 4) {
+      Alert.alert('Invalid OTP', 'Please enter a valid OTP');
+      return;
+    }
+    dropPassenger(currentDropRoute, currentDropBooking, dropOtpValue);
+  };
+
+  const handleEndDuty = async (route) => {
+    if (!route) return;
+    
+    Alert.alert(
+      'End Duty',
+      'Are you sure you want to end your duty? All remaining stops will be processed.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'End Duty',
+          style: 'destructive',
+          onPress: () => {
+            setRouteToEnd(route);
+            setEndDutyModalVisible(true);
+          }
+        }
+      ]
+    );
+  };
+
+  const handleEndDutySubmit = (skipReason = false) => {
+    if (!routeToEnd) return;
+    
+    const reason = skipReason ? null : (endDutyReason.trim() || null);
+    executeEndDuty(routeToEnd, reason);
+    setEndDutyModalVisible(false);
+    setEndDutyReason('');
+  };
+
+  const executeEndDuty = async (route, reason) => {
+    if (!route) return;
+    
+    setLoading(true);
+    
+    try {
+      const result = await endDuty(route.route_id, reason);
+      
+      if (result.success) {
+        // Clear active duty status
+        await AsyncStorage.removeItem('has_active_duty');
+        setHasActiveDuty(false);
+        
+        // Show success message
+        Alert.alert(
+          'Duty Ended Successfully',
+          'Route completed successfully!',
+          [
+            {
+              text: 'OK',
+              onPress: async () => {
+                // Automatically navigate back to upcoming trips
+                setToastMessage('Duty ended. Showing upcoming schedules.');
+                setToastType('success');
+                setShowToast(true);
+                await fetchRoutes();
+              }
+            }
+          ]
+        );
+      } else {
+        // Handle specific error codes
+        if (result.errorCode === 'PENDING_BOOKINGS_EXIST') {
+          const pendingCount = result.details?.pending_count || 'some';
+          Alert.alert(
+            'Cannot End Duty',
+            `You have ${pendingCount} pending booking(s). Please complete all pickups/drops or mark as no-show before ending duty.`,
+            [{ text: 'OK' }]
+          );
+        } else if (result.errorCode === 'INVALID_ROUTE_STATE') {
+          Alert.alert('Cannot End Duty', 'Route is not ongoing.', [{ text: 'OK' }]);
+        } else if (result.errorCode === 'ROUTE_NOT_FOUND') {
+          Alert.alert('Error', 'Route not found or not assigned to you.', [{ text: 'OK' }]);
+        } else {
+          setToastMessage(result.error || 'Failed to end duty');
+          setToastType('error');
+          setShowToast(true);
+        }
+      }
+    } catch (error) {
+      console.log('Error ending duty:', error);
+      setToastMessage('Network error. Please try again.');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
 
   const renderRouteCard = (route, index) => {
+    // Add null check for route
+    if (!route) return null;
+    
     const totalStops = route.stops?.length || 0;
     const totalDistance = route.summary?.total_distance_km || 0;
     const totalTime = route.summary?.total_time_minutes || 0;
     const shiftTime = formatTime(route.shift_time);
     
-    // Determine pickup/drop based on log_type
-    const isPickup = route.log_type === 'IN';
-    const routeType = isPickup ? 'Pickup' : 'Drop';
+    // Simplified view for upcoming routes
+    if (route.status === 'Driver Assigned') {
+      return (
+        <View key={route.route_id || index} style={styles.simpleRouteCard}>
+          <View style={styles.simpleCardContent}>
+            <View style={styles.simpleCardRow}>
+              <Text style={styles.simpleRouteId}>Route #{route.route_id}</Text>
+              <Text style={styles.simpleRouteTime}>🕐 {shiftTime}</Text>
+            </View>
+            
+            <View style={styles.simpleCardRow}>
+              <View style={styles.simpleInfoItem}>
+                <Text style={styles.simpleInfoIcon}>👥</Text>
+                <Text style={styles.simpleInfoText}>{totalStops}</Text>
+              </View>
+              <View style={styles.simpleInfoItem}>
+                <Text style={styles.simpleInfoIcon}>📏</Text>
+                <Text style={styles.simpleInfoText}>{totalDistance.toFixed(1)} km</Text>
+              </View>
+            </View>
+            
+            <TouchableOpacity
+              style={[
+                styles.simpleStartDutyButton,
+                startingDuty === route.route_id && styles.startDutyButtonDisabled
+              ]}
+              onPress={() => handleStartDuty(route)}
+              disabled={startingDuty === route.route_id}
+              activeOpacity={0.7}
+            >
+              {startingDuty === route.route_id ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.simpleStartDutyButtonText}>🚀 Start Duty</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
     
-    // Get first and last stop for locations
-    const firstStop = route.stops?.[0];
-    const lastStop = route.stops?.[route.stops?.length - 1];
-    
-    const pickupLocation = isPickup 
-      ? (firstStop?.pickup_location || 'Not specified')
-      : (firstStop?.drop_location || 'Office');
-    
-    const dropLocation = isPickup 
-      ? 'Office'
-      : (lastStop?.drop_location || 'Not specified');
-
+    // Full view for ongoing routes (always expanded)
     return (
-      <TouchableOpacity
-        key={route.route_id || index}
+      <View
+        key={route?.route_id || index}
         style={styles.routeCard}
-        onPress={() => {
-          navigation.navigate('RideDetails', { routeData: route });
-        }}
-        activeOpacity={0.7}
       >
+        {/* Header - No collapsible functionality */}
         <View style={styles.cardContent}>
           {/* Header Row */}
           <View style={styles.cardHeader}>
             <View style={styles.routeInfoRow}>
-              <Text style={styles.routeName}>Route #{route.route_id}</Text>
-              <View style={[styles.statusBadge, route.log_type === 'IN' ? styles.pickupBadge : styles.dropBadge]}>
-                <Text style={styles.statusText}>{route.log_type === 'IN' ? '🏠' : '🏢'} {routeType}</Text>
+              <Text style={styles.routeName}>Route #{route?.route_id || 'N/A'}</Text>
+              <View style={[styles.statusBadge, route?.log_type === 'IN' ? styles.pickupBadge : styles.dropBadge]}>
+                <Text style={styles.statusText}>{route?.log_type === 'IN' ? '🏠' : '🏢'} {route?.log_type === 'IN' ? 'Pickup' : 'Drop'}</Text>
               </View>
             </View>
-            <Text style={styles.routeTime}>🕐 {shiftTime}</Text>
-          </View>
-
-          {/* Locations */}
-          <View style={styles.locationSection}>
-            <View style={styles.locationRow}>
-              <Text style={styles.locationIcon}>📍</Text>
-              <View style={styles.locationInfo}>
-                <Text style={styles.locationLabel}>Start</Text>
-                <Text style={styles.locationText} numberOfLines={2}>
-                  {pickupLocation}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.stopsIndicator}>
-              <Text style={styles.stopsText}>{totalStops} stops</Text>
-            </View>
-
-            <View style={styles.locationRow}>
-              <Text style={styles.locationIcon}>🎯</Text>
-              <View style={styles.locationInfo}>
-                <Text style={styles.locationLabel}>End</Text>
-                <Text style={styles.locationText} numberOfLines={2}>
-                  {dropLocation}
-                </Text>
-              </View>
+            <View style={styles.headerRight}>
+              <Text style={styles.routeTime}>🕐 {shiftTime}</Text>
             </View>
           </View>
 
-          {/* Footer Stats */}
+          {/* Summary Stats */}
           <View style={styles.routeFooter}>
             <View style={styles.routeInfo}>
               <Text style={styles.routeInfoIcon}>👥</Text>
@@ -369,8 +758,172 @@ export default function RidesScreen({ navigation }) {
             </View>
           </View>
         </View>
-      </TouchableOpacity>
+
+        {/* Always Expanded Details */}
+        <View style={styles.expandedContent}>
+          {/* Passengers List */}
+          <View style={styles.passengersSection}>
+            <Text style={styles.sectionTitle}>Passengers ({totalStops})</Text>
+            
+            {route.stops?.map((stop, idx) => {
+              // Skip if stop is null or undefined
+              if (!stop || typeof stop !== 'object') return null;
+              
+              const isPickup = route?.log_type === 'IN';
+              
+              // Determine what to show based on booking status
+              let showAddress = true;
+              let showNavigate = true;
+              let displayLocation = '';
+              let displayLat = null;
+              let displayLng = null;
+              let addressLabel = '';
+              
+              if (stop.status === 'NoShow' || stop.status === 'No Show' || stop.status === 'No-Show') {
+                // NoShow/No Show/No-Show: hide address and navigate button
+                showAddress = false;
+                showNavigate = false;
+              } else if (stop.status === 'Ongoing') {
+                // Ongoing: show drop location
+                displayLocation = stop.drop_location || 'Drop location not specified';
+                displayLat = stop.drop_latitude;
+                displayLng = stop.drop_longitude;
+                addressLabel = 'Drop Address:';
+              } else {
+                // Other statuses: show pickup location
+                displayLocation = stop.pickup_location || 'Pickup location not specified';
+                displayLat = stop.pickup_latitude;
+                displayLng = stop.pickup_longitude;
+                addressLabel = 'Pickup Address:';
+              }
+              
+              return (
+              <View key={stop.booking_id || idx} style={styles.passengerCard}>
+                <View style={styles.passengerHeader}>
+                  <View style={styles.passengerInfo}>
+                    <Text style={styles.passengerName}>{stop?.employee_name || 'Unknown Passenger'}</Text>
+                    <Text style={styles.passengerPhone}>📞 {stop?.employee_phone || 'N/A'}</Text>
+                  </View>
+                  <View style={[styles.passengerStatusBadge, getStatusBadgeStyle(stop?.status)]}>
+                    <Text style={styles.passengerStatusText}>{stop?.status || 'Unknown'}</Text>
+                  </View>
+                </View>
+                
+                {showAddress && (
+                  <View style={styles.passengerDetails}>
+                    <Text style={styles.passengerAddressLabel}>
+                      📍 {addressLabel}
+                    </Text>
+                    <Text style={styles.passengerAddress}>{displayLocation}</Text>
+                    
+                    <View style={styles.passengerMetaRow}>
+                      <Text style={styles.passengerDetailText}>
+                        🕐 ETA: {formatTime(stop.estimated_pick_up_time)}
+                      </Text>
+                      {stop.is_boarding_otp_required && (
+                        <Text style={styles.otpRequired}>🔐 OTP Required</Text>
+                      )}
+                    </View>
+
+                    {/* Navigate Button */}
+                    {showNavigate && displayLat && displayLng && (
+                      <TouchableOpacity 
+                        style={styles.navigateButton}
+                        onPress={() => navigateToAddress(displayLat, displayLng, displayLocation)}
+                      >
+                        <Text style={styles.navigateButtonText}>
+                          🧭 Navigate to {stop.status === 'Ongoing' ? 'Drop' : 'Pickup'} Address
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Action Buttons for Ongoing Routes */}
+                {route?.status === 'Ongoing' && stop?.status === 'Scheduled' && (
+                  <View style={styles.passengerActions}>
+                    <TouchableOpacity 
+                      style={[
+                        styles.pickupButton,
+                        processingPickup === stop.booking_id && styles.buttonDisabled
+                      ]}
+                      onPress={() => handlePickupPress(route, stop)}
+                      disabled={processingPickup === stop?.booking_id}
+                    >
+                      {processingPickup === stop.booking_id ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.pickupButtonText}>✅ Start Pickup</Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[
+                        styles.noShowButton,
+                        processingNoShow === stop.booking_id && styles.buttonDisabled
+                      ]}
+                      onPress={() => handleNoShowPress(route, stop)}
+                      disabled={processingNoShow === stop?.booking_id}
+                    >
+                      {processingNoShow === stop.booking_id ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.noShowButtonText}>❌ No Show</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {route?.status === 'Ongoing' && stop?.status === 'Ongoing' && (
+                  <TouchableOpacity 
+                    style={[
+                      styles.dropButton,
+                      processingDrop === stop.booking_id && styles.buttonDisabled
+                    ]}
+                    onPress={() => handleDropPress(route, stop)}
+                    disabled={processingDrop === stop?.booking_id}
+                  >
+                    {processingDrop === stop.booking_id ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.dropButtonText}>🏁 Drop Off</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+            )})}
+          </View>
+
+          {/* Action Buttons */}
+          {route?.status === 'Ongoing' && (
+            <View style={styles.ongoingActions}>
+              <TouchableOpacity 
+                style={styles.endDutyButton}
+                onPress={() => handleEndDuty(route)}
+              >
+                <Text style={styles.endDutyButtonText}>🏁 End Duty</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </View>
     );
+  };
+
+  const getStatusBadgeStyle = (status) => {
+    switch (status) {
+      case 'Completed':
+        return styles.statusCompleted;
+      case 'Ongoing':
+        return styles.statusOngoing;
+      case 'Scheduled':
+        return styles.statusScheduled;
+      case 'NoShow':
+      case 'No Show':
+      case 'No-Show':
+        return styles.statusNoShow;
+      default:
+        return styles.statusScheduled;
+    }
   };
 
   // Block app usage if overlay permission not granted
@@ -442,7 +995,7 @@ export default function RidesScreen({ navigation }) {
             <Text style={styles.drawerItemText}>👤 Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); }}>
-            <Text style={styles.drawerItemText}>🚗 My Rides</Text>
+            <Text style={styles.drawerItemText}>📅 My Schedules</Text>
           </TouchableOpacity>
           
           <View style={styles.drawerDivider} />
@@ -466,26 +1019,25 @@ export default function RidesScreen({ navigation }) {
               <View style={styles.menuLine} />
             </View>
           </TouchableOpacity>
-          <Text style={styles.title}>My Rides</Text>
+          <View>
+            <Text style={styles.title}>My Schedules</Text>
+            <Text style={styles.subtitle}>
+              {hasActiveDuty ? '🔄 On Duty' : '📅 Upcoming'}
+            </Text>
+          </View>
         </View>
         
+        {/* Refresh Button */}
         <TouchableOpacity 
-          style={styles.dateSelector}
-          onPress={() => setShowDatePicker(true)}
+          style={styles.refreshButton}
+          onPress={onRefresh}
+          disabled={refreshing}
         >
-          <Text style={styles.dateIcon}>📅</Text>
-          <Text style={styles.dateText}>{formatDisplayDate(selectedDate)}</Text>
-          <Text style={styles.dropdownIcon}>▼</Text>
+          <Text style={styles.refreshButtonText}>
+            {refreshing ? '⏳' : '🔄'}
+          </Text>
         </TouchableOpacity>
       </View>
-
-      {/* Calendar Picker Modal */}
-      <CalendarPicker
-        visible={showDatePicker}
-        onClose={() => setShowDatePicker(false)}
-        selectedDate={selectedDate}
-        onSelectDate={handleDateSelect}
-      />
 
       {loading && !refreshing ? (
         <View style={styles.centerContainer}>
@@ -500,64 +1052,194 @@ export default function RidesScreen({ navigation }) {
           </TouchableOpacity>
         </View>
       ) : (
-        <>
-          {/* Tabs */}
-          <View style={styles.tabsContainer}>
-            {tabs.map((tab) => {
-              const count = tab.key === selectedTab ? filteredRoutes.length : 0;
-              return (
-                <TouchableOpacity
-                  key={tab.key}
-                  style={[
-                    styles.tabButton,
-                    selectedTab === tab.key && styles.tabButtonActive
-                  ]}
-                  onPress={() => handleTabChange(tab.key)}
-                >
-                  <Text style={[
-                    styles.tabLabel,
-                    selectedTab === tab.key && styles.tabLabelActive
-                  ]}>
-                    {tab.icon} {tab.label}
-                  </Text>
-                  {selectedTab === tab.key && (
-                    <View style={[
-                      styles.tabCountBadge,
-                      selectedTab === tab.key && styles.tabCountBadgeActive
-                    ]}>
-                      <Text style={[
-                        styles.tabCount,
-                        selectedTab === tab.key && styles.tabCountActive
-                      ]}>
-                        {count}
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-            }
-          >
-            {filteredRoutes.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>🚗</Text>
-                <Text style={styles.emptyText}>No {selectedTab} routes</Text>
-                <Text style={styles.emptySubtext}>
-                  {selectedTab === 'upcoming' ? 'Your assigned routes will appear here' : 'No routes in this category'}
-                </Text>
-              </View>
-            ) : (
-              filteredRoutes.map((route, index) => renderRouteCard(route, index))
-            )}
-          </ScrollView>
-        </>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          {filteredRoutes.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>📅</Text>
+              <Text style={styles.emptyText}>
+                {hasActiveDuty ? 'No ongoing duty' : 'No upcoming schedules'}
+              </Text>
+              <Text style={styles.emptySubtext}>
+                {hasActiveDuty 
+                  ? 'Complete your current duty to see new routes' 
+                  : 'Your assigned routes for today will appear here'}
+              </Text>
+            </View>
+          ) : (
+            filteredRoutes.map((route, index) => renderRouteCard(route, index))
+          )}
+        </ScrollView>
       )}
+
+      {/* OTP Modal */}
+      <Modal
+        visible={otpModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setOtpModalVisible(false);
+          setOtpValue('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.otpModal}>
+            <Text style={styles.otpModalTitle}>Enter Boarding OTP</Text>
+            <Text style={styles.otpModalSubtitle}>
+              {currentBooking?.employee_name}
+            </Text>
+            
+            <TextInput
+              style={styles.otpInput}
+              value={otpValue}
+              onChangeText={setOtpValue}
+              placeholder="Enter OTP"
+              keyboardType="number-pad"
+              maxLength={6}
+              autoFocus={true}
+            />
+
+            <View style={styles.otpModalActions}>
+              <TouchableOpacity
+                style={[styles.otpModalButton, styles.otpCancelButton]}
+                onPress={() => {
+                  setOtpModalVisible(false);
+                  setOtpValue('');
+                }}
+              >
+                <Text style={styles.otpCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.otpModalButton, styles.otpSubmitButton]}
+                onPress={handleOtpSubmit}
+                disabled={processingPickup !== null}
+              >
+                {processingPickup ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.otpSubmitButtonText}>Confirm</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Drop OTP Modal */}
+      <Modal
+        visible={dropOtpModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setDropOtpModalVisible(false);
+          setDropOtpValue('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.otpModal}>
+            <Text style={styles.otpModalTitle}>Enter Drop-off OTP</Text>
+            <Text style={styles.otpModalSubtitle}>
+              {currentDropBooking?.employee_name}
+            </Text>
+            
+            <TextInput
+              style={styles.otpInput}
+              value={dropOtpValue}
+              onChangeText={setDropOtpValue}
+              placeholder="Enter OTP"
+              keyboardType="number-pad"
+              maxLength={6}
+              autoFocus={true}
+            />
+
+            <View style={styles.otpModalActions}>
+              <TouchableOpacity
+                style={[styles.otpModalButton, styles.otpCancelButton]}
+                onPress={() => {
+                  setDropOtpModalVisible(false);
+                  setDropOtpValue('');
+                }}
+              >
+                <Text style={styles.otpCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.otpModalButton, styles.otpSubmitButton]}
+                onPress={handleDropOtpSubmit}
+                disabled={processingDrop !== null}
+              >
+                {processingDrop ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.otpSubmitButtonText}>Confirm</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* End Duty Reason Modal */}
+      <Modal
+        visible={endDutyModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setEndDutyModalVisible(false);
+          setEndDutyReason('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.otpModal}>
+            <Text style={styles.otpModalTitle}>End Duty Reason</Text>
+            <Text style={styles.otpModalSubtitle}>
+              Optional: Provide a reason for ending duty
+            </Text>
+            
+            <TextInput
+              style={styles.reasonInput}
+              value={endDutyReason}
+              onChangeText={setEndDutyReason}
+              placeholder="Enter reason (optional)"
+              multiline={true}
+              numberOfLines={3}
+              textAlignVertical="top"
+              autoFocus={true}
+            />
+
+            <View style={styles.otpModalActions}>
+              <TouchableOpacity
+                style={[styles.otpModalButton, styles.otpCancelButton]}
+                onPress={() => {
+                  setEndDutyModalVisible(false);
+                  setEndDutyReason('');
+                }}
+              >
+                <Text style={styles.otpCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.otpModalButton, styles.skipButton]}
+                onPress={() => handleEndDutySubmit(true)}
+              >
+                <Text style={styles.otpCancelButtonText}>Skip</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.otpModalButton, styles.otpSubmitButton]}
+                onPress={() => handleEndDutySubmit(false)}
+              >
+                <Text style={styles.otpSubmitButtonText}>Submit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -691,6 +1373,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
   },
+  subtitle: {
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  refreshButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  refreshButtonText: {
+    fontSize: 18,
+  },
   dateSelector: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -798,20 +1497,89 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f0f0f0',
   },
+  simpleRouteCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  simpleCardContent: {
+    padding: 16,
+  },
+  simpleCardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  simpleRouteId: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2d3436',
+  },
+  simpleRouteTime: {
+    fontSize: 14,
+    color: '#6C63FF',
+    fontWeight: '600',
+  },
+  simpleInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  simpleInfoIcon: {
+    fontSize: 14,
+    color: '#636e72',
+  },
+  simpleInfoText: {
+    fontSize: 14,
+    color: '#2d3436',
+    fontWeight: '600',
+  },
+  simpleStartDutyButton: {
+    backgroundColor: '#6C63FF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+    alignItems: 'center',
+    shadowColor: '#6C63FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  simpleStartDutyButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
   cardContent: {
     padding: 14,
   },
   cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
     paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   routeInfoRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    gap: 8,
   },
   routeName: {
     fontSize: 15,
@@ -838,6 +1606,237 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     color: '#2d3436',
+  },
+  expandedContent: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#2d3436',
+    marginBottom: 10,
+  },
+  passengersSection: {
+    marginTop: 12,
+  },
+  passengerCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: '#6C63FF',
+  },
+  passengerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  passengerInfo: {
+    flex: 1,
+  },
+  passengerName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#2d3436',
+    marginBottom: 2,
+  },
+  passengerPhone: {
+    fontSize: 12,
+    color: '#636e72',
+  },
+  passengerStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  passengerStatusText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  statusScheduled: {
+    backgroundColor: '#74b9ff',
+  },
+  statusOngoing: {
+    backgroundColor: '#fdcb6e',
+  },
+  statusCompleted: {
+    backgroundColor: '#00b894',
+  },
+  statusNoShow: {
+    backgroundColor: '#d63031',
+  },
+  passengerDetails: {
+    marginTop: 8,
+  },
+  passengerAddressLabel: {
+    fontSize: 11,
+    color: '#636e72',
+    fontWeight: '600',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  passengerAddress: {
+    fontSize: 13,
+    color: '#2d3436',
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  passengerMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  passengerDetailText: {
+    fontSize: 12,
+    color: '#636e72',
+  },
+  otpRequired: {
+    fontSize: 11,
+    color: '#6C63FF',
+    fontWeight: '600',
+    backgroundColor: '#e8e6ff',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  navigateButton: {
+    backgroundColor: '#0984e3',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  navigateButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  passengerActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  pickupButton: {
+    flex: 1,
+    backgroundColor: '#00b894',
+    paddingVertical: 10,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  pickupButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  noShowButton: {
+    flex: 1,
+    backgroundColor: '#d63031',
+    paddingVertical: 10,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  noShowButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  dropButton: {
+    backgroundColor: '#6C63FF',
+    paddingVertical: 10,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  dropButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  otpModal: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 24,
+    width: '85%',
+    maxWidth: 400,
+  },
+  otpModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2d3436',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  otpModalSubtitle: {
+    fontSize: 14,
+    color: '#636e72',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  otpInput: {
+    borderWidth: 2,
+    borderColor: '#6C63FF',
+    borderRadius: 8,
+    padding: 15,
+    fontSize: 24,
+    textAlign: 'center',
+    letterSpacing: 8,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  otpModalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  otpModalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  otpCancelButton: {
+    backgroundColor: '#dfe6e9',
+  },
+  otpCancelButtonText: {
+    color: '#2d3436',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  otpSubmitButton: {
+    backgroundColor: '#6C63FF',
+  },
+  otpSubmitButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  ongoingActions: {
+    marginTop: 12,
+  },
+  endDutyButton: {
+    backgroundColor: '#d63031',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  endDutyButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
   },
   locationSection: {
     marginBottom: 10,
@@ -901,6 +1900,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#636e72',
     fontWeight: '600',
+  },
+  startDutyButton: {
+    backgroundColor: '#6C63FF',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginTop: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#6C63FF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  startDutyButtonDisabled: {
+    backgroundColor: '#a29bfe',
+    opacity: 0.7,
+  },
+  startDutyButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  ongoingBadge: {
+    backgroundColor: '#00b894',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  ongoingBadgeText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   centerContainer: {
     flex: 1,
@@ -1029,5 +2065,20 @@ const styles = StyleSheet.create({
     color: '#2d3436',
     fontSize: 16,
     fontWeight: '600',
+  },
+  reasonInput: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#dfe6e9',
+    borderRadius: 12,
+    padding: 15,
+    fontSize: 16,
+    backgroundColor: '#f8f9fa',
+    marginBottom: 20,
+    minHeight: 80,
+  },
+  skipButton: {
+    backgroundColor: '#95a5a6',
+    flex: 1,
   },
 });

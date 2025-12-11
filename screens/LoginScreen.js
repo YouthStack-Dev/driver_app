@@ -20,8 +20,8 @@ export default function LoginScreen({ navigation }) {
       const session = await sessionService.getSession();
       
       if (session && session.access_token) {
-        console.log('✅ Valid session found, navigating to Rides');
-        navigation.replace('Rides');
+        console.log('✅ Valid session found, navigating to Schedules');
+        navigation.replace('Schedules');
         return;
       }
       

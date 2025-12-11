@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput,
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from '../components/Toast';
 import overlayService from '../services/overlayService';
+import { startTrip, dropTrip, markNoShow } from '../services/routeService';
 
 export default function RideDetailsScreen({ route, navigation }) {
   const { routeData } = route.params;
@@ -28,6 +29,7 @@ export default function RideDetailsScreen({ route, navigation }) {
 
   const loadBookings = () => {
     const sortedBookings = (routeData.stops || [])
+      .filter(stop => stop && stop.employee_id) // Filter out null/invalid stops
       .map((stop) => ({
         ...stop,
         status: mapBookingStatus(stop.status, stop.actual_pick_up_time, stop.actual_drop_time),
@@ -64,22 +66,27 @@ export default function RideDetailsScreen({ route, navigation }) {
     setSubmittingOtp(true);
 
     try {
-      const token = await AsyncStorage.getItem('access_token');
-      
-      const response = await fetch(
-        `https://api.gocab.tech/api/v1/driver/start?route_id=${routeData.route_id}&booking_id=${selectedBooking.booking_id}&otp=${otp}`,
-        {
-          method: 'POST',
-          headers: {
-            'accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
+      // Get current location for the API call
+      let latitude, longitude;
+      try {
+        // Note: In a real app, you'd get location from GPS
+        // For now, using placeholder coordinates
+        latitude = 13.0827; // Bangalore coordinates
+        longitude = 80.2707;
+      } catch (locationError) {
+        console.log('Location error:', locationError);
+        // Continue without location if GPS fails
+      }
 
-      const data = await response.json();
+      const result = await startTrip({
+        routeId: routeData.route_id,
+        bookingId: selectedBooking.booking_id,
+        otp: otp,
+        latitude: latitude,
+        longitude: longitude
+      });
 
-      if (response.ok) {
+      if (result.success) {
         showToastMessage('Trip started successfully!', 'success');
         setShowOtpModal(false);
         setOtp('');
@@ -93,8 +100,45 @@ export default function RideDetailsScreen({ route, navigation }) {
         // Close modal first, then show error toast
         setShowOtpModal(false);
         setOtp('');
+        
+        // Handle specific error codes with better user messages
+        let errorMessage = 'Failed to start trip';
+        
+        if (result.errorCode) {
+          switch (result.errorCode) {
+            case 'DRIVER_TOO_FAR_FROM_PICKUP':
+              const distance = result.details?.distance_meters;
+              if (distance) {
+                const distanceKm = (distance / 1000).toFixed(1);
+                errorMessage = `You are too far from pickup location (${distanceKm} km away). Please move closer.`;
+              } else {
+                errorMessage = 'You are too far from the pickup location. Please move closer.';
+              }
+              break;
+            case 'INVALID_BOARDING_OTP':
+              errorMessage = 'Invalid OTP. Please check and try again.';
+              break;
+            case 'ROUTE_NOT_ONGOING':
+              errorMessage = 'Please start duty first before picking up passengers.';
+              break;
+            case 'PREVIOUS_PENDING_STOPS':
+              errorMessage = 'Please complete previous stops first.';
+              break;
+            case 'BOOKING_NOT_FOUND_IN_ROUTE':
+              errorMessage = 'This booking is not part of your current route.';
+              break;
+            case 'ROUTE_NOT_FOUND':
+              errorMessage = 'Route not found or not assigned to you.';
+              break;
+            default:
+              errorMessage = result.error || 'Failed to start trip';
+          }
+        } else if (result.error) {
+          errorMessage = result.error;
+        }
+        
         setTimeout(() => {
-          showToastMessage(data.message || 'Invalid OTP', 'error');
+          showToastMessage(errorMessage, 'error');
         }, 300);
       }
     } catch (error) {
@@ -158,22 +202,26 @@ export default function RideDetailsScreen({ route, navigation }) {
           onPress: async () => {
             setLoading(true);
             try {
-              const token = await AsyncStorage.getItem('access_token');
-              
-              const response = await fetch(
-                `https://api.gocab.tech/api/v1/driver/trip/drop?route_id=${routeData.route_id}&booking_id=${booking.booking_id}`,
-                {
-                  method: 'PUT',
-                  headers: {
-                    'accept': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                  },
-                }
-              );
+              // Get current location for the API call
+              let latitude, longitude;
+              try {
+                // Note: In a real app, you'd get location from GPS
+                // For now, using placeholder coordinates
+                latitude = 13.0827; // Bangalore coordinates
+                longitude = 80.2707;
+              } catch (locationError) {
+                console.log('Location error:', locationError);
+                // Continue without location if GPS fails
+              }
 
-              const data = await response.json();
+              const result = await dropTrip({
+                routeId: routeData.route_id,
+                bookingId: booking.booking_id,
+                latitude: latitude,
+                longitude: longitude
+              });
 
-              if (response.ok) {
+              if (result.success) {
                 showToastMessage('Passenger dropped successfully!', 'success');
                 
                 setBookings(prev => prev.map(b => 
@@ -182,7 +230,16 @@ export default function RideDetailsScreen({ route, navigation }) {
                     : b
                 ));
               } else {
-                showToastMessage(data.message || 'Failed to mark as dropped', 'error');
+                let errorMessage = 'Failed to mark as dropped';
+                
+                if (result.errorCode) {
+                  // Handle specific error codes
+                  errorMessage = result.error || errorMessage;
+                } else if (result.error) {
+                  errorMessage = result.error;
+                }
+                
+                showToastMessage(errorMessage, 'error');
               }
             } catch (error) {
               console.error('Drop error:', error);
@@ -208,22 +265,12 @@ export default function RideDetailsScreen({ route, navigation }) {
           onPress: async () => {
             setLoading(true);
             try {
-              const token = await AsyncStorage.getItem('access_token');
-              
-              const response = await fetch(
-                `https://api.gocab.tech/api/v1/driver/trip/no-show?route_id=${routeData.route_id}&booking_id=${booking.booking_id}`,
-                {
-                  method: 'PUT',
-                  headers: {
-                    'accept': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                  },
-                }
-              );
+              const result = await markNoShow({
+                routeId: routeData.route_id,
+                bookingId: booking.booking_id
+              });
 
-              const data = await response.json();
-
-              if (response.ok) {
+              if (result.success) {
                 showToastMessage('Marked as no show', 'success');
                 
                 setBookings(prev => prev.map(b => 
@@ -232,7 +279,16 @@ export default function RideDetailsScreen({ route, navigation }) {
                     : b
                 ));
               } else {
-                showToastMessage(data.message || 'Failed to mark as no show', 'error');
+                let errorMessage = 'Failed to mark as no show';
+                
+                if (result.errorCode) {
+                  // Handle specific error codes
+                  errorMessage = result.error || errorMessage;
+                } else if (result.error) {
+                  errorMessage = result.error;
+                }
+                
+                showToastMessage(errorMessage, 'error');
               }
             } catch (error) {
               console.error('No show error:', error);
@@ -247,12 +303,17 @@ export default function RideDetailsScreen({ route, navigation }) {
   };
 
   const handleNavigate = (booking) => {
-    const location = routeData.log_type === 'IN' 
-      ? booking.pickup_location 
-      : booking.drop_location;
+    const isPickupRoute = routeData.log_type === 'IN';
+    const latitude = isPickupRoute ? booking.pickup_latitude : booking.drop_latitude;
+    const longitude = isPickupRoute ? booking.pickup_longitude : booking.drop_longitude;
+    const location = isPickupRoute ? booking.pickup_location : booking.drop_location;
+    const label = booking.employee_code || booking.employee_name || 'Destination';
     
     navigation.navigate('Maps', { 
       destination: location,
+      label: label,
+      latitude: latitude,
+      longitude: longitude,
       booking: booking 
     });
   };

@@ -5,6 +5,16 @@ export const API_ENDPOINTS = {
   LOGIN_CONFIRM: '/api/v1/auth/driver/login/confirm',
   SWITCH_COMPANY: '/api/v1/auth/driver/switch-company',
   DRIVER_TRIPS: '/api/v1/driver/trips',
+  
+  // Duty Management Endpoints (New v2.0 Flow)
+  DUTY_START: '/api/v1/driver/duty/start',
+  DUTY_END: '/api/v1/driver/duty/end',
+  
+  // Trip Operations Endpoints (Updated v2.0 Flow)
+  TRIP_START: '/api/v1/driver/trip/start',
+  TRIP_DROP: '/api/v1/driver/trip/drop',
+  TRIP_NO_SHOW: '/api/v1/driver/trip/no-show',
+  
   BOOKINGS: '/api/v1/bookings/employee',
   BOOKING_DETAILS: '/api/v1/bookings', // Will be used as /api/v1/bookings/{booking_id}
   WEEKOFF_CONFIG: '/api/v1/weekoff-configs',

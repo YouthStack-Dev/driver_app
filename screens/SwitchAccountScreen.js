@@ -78,10 +78,10 @@ export default function SwitchAccountScreen({ navigation }) {
             {
               text: 'OK',
               onPress: () => {
-                // Navigate to My Rides page
+                // Navigate to My Schedules page
                 navigation.reset({
                   index: 0,
-                  routes: [{ name: 'Rides' }],
+                  routes: [{ name: 'Schedules' }],
                 });
               },
             },

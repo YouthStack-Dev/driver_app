@@ -56,7 +56,7 @@ export default function SelectAccountScreen({ navigation }) {
 
       if (res.success) {
         setConfirmError(null);
-        navigation.replace('Rides');
+        navigation.replace('Schedules');
         return;
       }
 

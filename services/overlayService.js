@@ -1,35 +1,38 @@
 import { NativeModules, Platform } from 'react-native';
 
-const { FloatingOverlay } = NativeModules;
+const { FloatingOverlay } = NativeModules || {};
+const isOverlayAvailable = Platform.OS === 'android' && !!FloatingOverlay;
 
 class OverlayService {
   async checkPermission() {
-    if (Platform.OS !== 'android') {
+    if (!isOverlayAvailable) {
+      // No native overlay available (Expo), consider permission as granted for testing
       return true;
     }
     try {
       return await FloatingOverlay.checkPermission();
     } catch (error) {
-      console.error('Error checking overlay permission:', error);
+      console.warn('Error checking overlay permission:', error);
       return false;
     }
   }
 
   async requestPermission() {
-    if (Platform.OS !== 'android') {
+    if (!isOverlayAvailable) {
+      // Nothing to request in Expo, treat as success
       return true;
     }
     try {
       return await FloatingOverlay.requestPermission();
     } catch (error) {
-      console.error('Error requesting overlay permission:', error);
+      console.warn('Error requesting overlay permission:', error);
       return false;
     }
   }
 
   async showOverlay() {
-    if (Platform.OS !== 'android') {
-      console.log('Overlay not supported on this platform');
+    if (!isOverlayAvailable) {
+      // No overlay available - noop in Expo
       return false;
     }
     try {
@@ -47,7 +50,8 @@ class OverlayService {
   }
 
   async hideOverlay() {
-    if (Platform.OS !== 'android') {
+    if (!isOverlayAvailable) {
+      // No overlay available - noop in Expo
       return true;
     }
     try {

@@ -40,7 +40,7 @@ export default function AppNavigator() {
           options={{ headerShown: false }}
         />
         <Stack.Screen 
-          name="Rides" 
+          name="Schedules" 
           component={RidesScreen}
           options={{ headerShown: false }}
         />

@@ -97,8 +97,8 @@ export default function DashboardScreen({ navigation }) {
             <Text style={styles.drawerItemText}>👤 Profile</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); navigation.navigate('Rides'); }}>
-            <Text style={styles.drawerItemText}>🚗 My Rides</Text>
+          <TouchableOpacity style={styles.drawerItem} onPress={() => { closeDrawer(); navigation.navigate('Schedules'); }}>
+            <Text style={styles.drawerItemText}>📅 My Schedules</Text>
           </TouchableOpacity>
           
           <View style={styles.drawerDivider} />

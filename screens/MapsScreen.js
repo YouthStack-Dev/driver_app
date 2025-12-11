@@ -3,26 +3,31 @@ import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform, Alert } fr
 import overlayService from '../services/overlayService';
 
 export default function MapsScreen({ route, navigation }) {
-  const { destination, booking } = route.params;
+  const { destination, label, latitude, longitude, booking } = route.params;
 
   useEffect(() => {
     // Auto-open maps when screen loads
-    openMaps();
+    if (latitude && longitude) {
+      openMaps();
+    }
   }, []);
 
   const openMaps = () => {
-    const latitude = booking.pickup_latitude;
-    const longitude = booking.pickup_longitude;
-    const label = encodeURIComponent(destination);
+    if (!latitude || !longitude) {
+      Alert.alert('Error', 'Location coordinates not available');
+      return;
+    }
+
+    const mapLabel = encodeURIComponent(label || destination || 'Destination');
 
     let url;
     
     if (Platform.OS === 'ios') {
       // iOS: Use Apple Maps
-      url = `maps:0,0?q=${label}@${latitude},${longitude}`;
+      url = `maps:0,0?q=${mapLabel}@${latitude},${longitude}`;
     } else {
       // Android: Use Google Maps
-      url = `geo:${latitude},${longitude}?q=${latitude},${longitude}(${label})`;
+      url = `geo:${latitude},${longitude}?q=${latitude},${longitude}(${mapLabel})`;
     }
 
     Linking.canOpenURL(url)
@@ -42,15 +47,21 @@ export default function MapsScreen({ route, navigation }) {
   };
 
   const openGoogleMaps = () => {
-    const latitude = booking.pickup_latitude;
-    const longitude = booking.pickup_longitude;
+    if (!latitude || !longitude) {
+      Alert.alert('Error', 'Location coordinates not available');
+      return;
+    }
+
     const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
     Linking.openURL(url);
   };
 
   const openWaze = () => {
-    const latitude = booking.pickup_latitude;
-    const longitude = booking.pickup_longitude;
+    if (!latitude || !longitude) {
+      Alert.alert('Error', 'Location coordinates not available');
+      return;
+    }
+
     const url = `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`;
     Linking.openURL(url);
   };
@@ -63,7 +74,7 @@ export default function MapsScreen({ route, navigation }) {
         </TouchableOpacity>
         <View style={styles.headerContent}>
           <Text style={styles.title}>Navigate</Text>
-          <Text style={styles.subtitle}>{booking.employee_code}</Text>
+          <Text style={styles.subtitle}>{label || booking?.employee_code || 'Unknown Employee'}</Text>
         </View>
       </View>
 
@@ -75,7 +86,10 @@ export default function MapsScreen({ route, navigation }) {
           <View style={styles.coordsRow}>
             <Text style={styles.coordLabel}>📍 Coordinates:</Text>
             <Text style={styles.coordValue}>
-              {booking.pickup_latitude.toFixed(6)}, {booking.pickup_longitude.toFixed(6)}
+              {latitude && longitude 
+                ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+                : 'Not available'
+              }
             </Text>
           </View>
         </View>
