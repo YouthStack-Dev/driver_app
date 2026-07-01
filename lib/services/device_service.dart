@@ -25,6 +25,9 @@ class DeviceService {
       // 2. Get Device Info & Android ID
       if (Platform.isAndroid) {
         androidId = await _androidIdPlugin.getId();
+        print('\n====================================');
+        print('MY REAL ANDROID ID IS: $androidId');
+        print('====================================\n');
         final androidInfo = await _deviceInfo.androidInfo;
         deviceModel = '${androidInfo.manufacturer} ${androidInfo.model}';
         osVersion = 'Android ${androidInfo.version.release} (SDK ${androidInfo.version.sdkInt})';

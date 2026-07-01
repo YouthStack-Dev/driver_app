@@ -85,15 +85,25 @@ class _LoginScreenState extends State<LoginScreen> {
                       width: 90,
                       height: 90,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2E7CFF).withValues(alpha: 0.08),
+                        color: Colors.white,
                         shape: BoxShape.circle,
                         border: Border.all(color: const Color(0xFF2E7CFF).withValues(alpha: 0.15), width: 2),
                       ),
                       alignment: Alignment.center,
-                      child: const Icon(
-                        Icons.directions_car_rounded,
-                        size: 42,
-                        color: Color(0xFF2E7CFF),
+                      child: ClipOval(
+                        child: Image.asset(
+                          'assets/images/logo.png',
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) {
+                            return const Icon(
+                              Icons.business,
+                              size: 42,
+                              color: Color(0xFF2E7CFF),
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),
