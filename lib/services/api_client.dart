@@ -121,17 +121,13 @@ class ApiClient {
           return handler.next(e);
         }
 
-        // ── 401 handling ─────────────────────────────────────────────────────
-        if (status == 401) {
+        // ── 401/403 handling ─────────────────────────────────────────────────
+        if (status == 401 || status == 403) {
           final bool isOngoingRide = LocationService().activeRouteId != null;
 
-          // Avoid infinite refresh loop: if the refresh endpoint itself 401s
+          // Avoid infinite refresh loop: if the refresh endpoint itself 401s or 403s
           if (e.requestOptions.path == ApiEndpoints.driverRefresh) {
-            debugPrint('🔒 Refresh token rejected by server.');
-            if (isOngoingRide) {
-              debugPrint('🛡️ Active ride — suppressing logout.');
-              return handler.next(e);
-            }
+            debugPrint('🔒 Refresh token rejected by server ($status).');
             // Refresh token is truly invalid — only safe time to logout
             await _safeLogout();
             return handler.next(e);

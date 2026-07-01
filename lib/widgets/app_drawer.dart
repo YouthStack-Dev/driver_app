@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/auth_provider.dart';
+import '../screens/trip_history_screen.dart';
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -14,7 +15,7 @@ class AppDrawer extends StatelessWidget {
     final driverPhoto = auth.driver?['photo_url'];
 
     return Drawer(
-      backgroundColor: const Color(0xFF122131),
+      backgroundColor: const Color(0xFFFFFFFF),
       child: Column(
         children: [
           // Custom Curved Header with Profile Info
@@ -22,15 +23,11 @@ class AppDrawer extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(20, 50, 20, 28),
             decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
-              ),
+              color: Colors.white,
               borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black38,
+                  color: Color(0x0C000000),
                   blurRadius: 10,
                   offset: Offset(0, 5),
                 ),
@@ -46,9 +43,9 @@ class AppDrawer extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withOpacity(0.12),
+                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3), width: 0.8),
+                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3), width: 0.8),
                       ),
                       child: Row(
                         children: [
@@ -90,12 +87,12 @@ class AppDrawer extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(2),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2E7CFF).withOpacity(0.3),
+                        color: const Color(0xFF2E7CFF).withValues(alpha: 0.3),
                         shape: BoxShape.circle,
                       ),
                       child: CircleAvatar(
                         radius: 28,
-                        backgroundColor: const Color(0xFF0F172A),
+                        backgroundColor: const Color(0xFF1E6BFF),
                         backgroundImage: driverPhoto != null ? NetworkImage(driverPhoto) : null,
                         child: driverPhoto == null
                             ? Text(
@@ -117,7 +114,7 @@ class AppDrawer extends StatelessWidget {
                           Text(
                             driverName,
                             style: GoogleFonts.poppins(
-                              color: const Color(0xFFD4E4FA),
+                              color: const Color(0xFF111827),
                               fontSize: 16.5,
                               fontWeight: FontWeight.bold,
                             ),
@@ -128,7 +125,7 @@ class AppDrawer extends StatelessWidget {
                           Text(
                             'Tenant ID: ${auth.tenantId}',
                             style: GoogleFonts.poppins(
-                              color: const Color(0xFFC2C6D7),
+                              color: const Color(0xFF6B7280),
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
                             ),
@@ -161,21 +158,35 @@ class AppDrawer extends StatelessWidget {
                   },
                 ),
                 _buildDrawerItem(
-                  icon: Icons.calendar_today_outlined,
-                  iconColor: const Color(0xFF10B981),
-                  title: 'My Schedules',
+                  icon: Icons.home_rounded,
+                  iconColor: const Color(0xFF2E7CFF),
+                  title: 'Home',
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.pushReplacementNamed(context, '/home'); // RidesScreen (Dashboard)
                   },
                 ),
+
                 _buildDrawerItem(
-                  icon: Icons.swap_horiz_rounded,
-                  iconColor: const Color(0xFFF59E0B),
-                  title: 'Switch Company',
+                  icon: Icons.history_rounded,
+                  iconColor: const Color(0xFF6366F1),
+                  title: 'Trip History',
                   onTap: () {
                     Navigator.pop(context);
-                    Navigator.pushNamed(context, '/switch-account');
+                    Navigator.push(
+                      context,
+                      PageRouteBuilder(
+                        pageBuilder: (_, _, _) => const TripHistoryScreen(),
+                        transitionsBuilder: (_, animation, _, child) =>
+                            SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(-1, 0), end: Offset.zero,
+                              ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
+                              child: child,
+                            ),
+                        transitionDuration: const Duration(milliseconds: 300),
+                      ),
+                    );
                   },
                 ),
               ],
@@ -188,7 +199,7 @@ class AppDrawer extends StatelessWidget {
             decoration: const BoxDecoration(
               border: Border(
                 top: BorderSide(
-                  color: Color(0xFF1E293B),
+                  color: Color(0xFF2E7CFF),
                   width: 1.2,
                 ),
               ),
@@ -196,7 +207,7 @@ class AppDrawer extends StatelessWidget {
             child: Column(
               children: [
                 Material(
-                  color: const Color(0xFFFFB4AB).withOpacity(0.08),
+                  color: const Color(0xFFFFB4AB).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
@@ -264,9 +275,9 @@ class AppDrawer extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: iconColor.withOpacity(0.1),
+                    color: iconColor.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
-                    border: Border.all(color: iconColor.withOpacity(0.2), width: 0.8),
+                    border: Border.all(color: iconColor.withValues(alpha: 0.2), width: 0.8),
                   ),
                   child: Icon(icon, color: iconColor, size: 20),
                 ),
@@ -275,7 +286,7 @@ class AppDrawer extends StatelessWidget {
                   child: Text(
                     title,
                     style: GoogleFonts.poppins(
-                      color: const Color(0xFFD4E4FA),
+                      color: const Color(0xFF111827),
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
                     ),
@@ -283,7 +294,7 @@ class AppDrawer extends StatelessWidget {
                 ),
                 const Icon(
                   Icons.arrow_forward_ios_rounded,
-                  color: Color(0xFF334155),
+                  color: Color(0xFFE8ECF4),
                   size: 13,
                 ),
               ],

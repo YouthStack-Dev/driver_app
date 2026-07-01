@@ -105,25 +105,31 @@ class RouteService {
   }
 
   /// Start Pickup (Start Trip)
+  /// [idempotencyKey] — stable client-generated key; safe to retry with the
+  ///   same key on network timeout without creating a duplicate stop event.
+  /// [deviceTimestamp] — device-local event time as ISO-8601 UTC string.
   Future<Map<String, dynamic>> startTrip({
     required String routeId,
     required String bookingId,
     String? otp,
     required double latitude,
     required double longitude,
+    String? idempotencyKey,
+    String? deviceTimestamp,
   }) async {
     try {
       _logger.i('Starting trip (Pickup) for booking: $bookingId');
       
-      final params = {
+      final params = <String, dynamic>{
         'route_id': routeId,
         'booking_id': bookingId,
         'current_latitude': latitude,
         'current_longitude': longitude,
       };
       if (otp != null) params['otp'] = otp;
+      if (idempotencyKey != null) params['idempotency_key'] = idempotencyKey;
+      if (deviceTimestamp != null) params['device_timestamp'] = deviceTimestamp;
 
-      // Fix: Use query params
       final response = await _dio.post(
         ApiEndpoints.tripStart,
         queryParameters: params,
@@ -135,25 +141,31 @@ class RouteService {
   }
 
   /// Drop Passenger (End Trip)
+  /// [idempotencyKey] — stable client-generated key; safe to retry with the
+  ///   same key on network timeout without creating a duplicate stop event.
+  /// [deviceTimestamp] — device-local event time as ISO-8601 UTC string.
   Future<Map<String, dynamic>> dropTrip({
     required String routeId,
     required String bookingId,
     String? otp,
     required double latitude,
     required double longitude,
+    String? idempotencyKey,
+    String? deviceTimestamp,
   }) async {
     try {
       _logger.i('Dropping passenger for booking: $bookingId');
       
-      final params = {
+      final params = <String, dynamic>{
         'route_id': routeId,
         'booking_id': bookingId,
         'current_latitude': latitude,
         'current_longitude': longitude,
       };
       if (otp != null) params['otp'] = otp;
+      if (idempotencyKey != null) params['idempotency_key'] = idempotencyKey;
+      if (deviceTimestamp != null) params['device_timestamp'] = deviceTimestamp;
 
-      // Fix: Use PUT and query params
       final response = await _dio.put(
         ApiEndpoints.tripEnd,
         queryParameters: params,
@@ -285,27 +297,91 @@ class RouteService {
     }
   }
 
+  /// Download Driver History Report as Excel
+  Future<Map<String, dynamic>> downloadDriverHistoryReport({
+    required String startDate,
+    required String endDate,
+    required String savePath,
+  }) async {
+    try {
+      final queryParams = {
+        'start_date': startDate,
+        'end_date': endDate,
+        'format': 'excel',
+      };
+
+      _logger.i('Downloading history report to: $savePath');
+      final response = await _dio.download(
+        ApiEndpoints.driverHistoryReport,
+        savePath,
+        queryParameters: queryParams,
+      );
+
+      return {'success': true};
+    } on DioException catch (e) {
+      _logger.e('Failed to download history report', error: e);
+      return _handleError(e);
+    } catch (e) {
+      _logger.e('History report download error', error: e);
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
   Map<String, dynamic> _handleError(DioException e) {
     String error = 'Network error';
     String? errorCode;
-    
+
+    final status = e.response?.statusCode;
+
+    // Map status codes to fallback messages (used only when the backend sends
+    // no body — e.g. pure network errors, timeouts, proxy errors).
+    // When the backend DOES send a JSON body with a 'message' field, that
+    // overrides these strings below.
+    if (status == 401) {
+      error = 'Session expired. Please log in again.';
+      errorCode = 'UNAUTHORIZED';
+    } else if (status == 403) {
+      error = 'Access denied. Session may have expired.';
+      errorCode = 'FORBIDDEN';
+    } else if (status == 404) {
+      error = 'Resource not found.';
+      errorCode = 'NOT_FOUND';
+    } else if (status == 409) {
+      // Conflict — stop event already recorded for this booking.
+      // The backend message (if present) will override 'error' below.
+      error = 'A conflicting stop event already exists.';
+      errorCode = 'STOP_EVENT_CONFLICT';
+    } else if (status != null && status >= 500) {
+      error = 'Server error. Please try again later.';
+      errorCode = 'SERVER_ERROR';
+    } else if (e.type == DioExceptionType.connectionTimeout ||
+               e.type == DioExceptionType.receiveTimeout ||
+               e.type == DioExceptionType.sendTimeout) {
+      error = 'Connection timed out. Please check your network.';
+      errorCode = 'TIMEOUT';
+    } else if (e.type == DioExceptionType.connectionError) {
+      error = 'No internet connection.';
+      errorCode = 'NETWORK_ERROR';
+    }
+
+    // Try to override with server's own message if available
     if (e.response?.data != null) {
       final data = e.response?.data;
       if (data is Map) {
          if (data.containsKey('detail')) {
            final detail = data['detail'];
            if (detail is List) {
-             // Handle list of validation errors
              error = detail.map((e) => "${e['loc']?.last}: ${e['msg']}").join(', ');
            } else if (detail is Map) {
-             error = detail['message'] ?? 'Validation error';
-           } else {
-             error = detail.toString();
+             error = detail['message'] ?? error;
+           } else if (detail is String && detail.isNotEmpty) {
+             error = detail;
            }
          } else {
-           error = data['message'] ?? 'Server error';
+           final msg = data['message'] ?? data['error'];
+           if (msg is String && msg.isNotEmpty) error = msg;
          }
-         errorCode = data['code'] ?? data['error_code'];
+         errorCode = data['code'] ?? data['error_code'] ?? errorCode;
       }
     }
     return {'success': false, 'error': error, 'errorCode': errorCode};

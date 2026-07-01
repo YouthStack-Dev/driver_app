@@ -84,8 +84,9 @@ class LocationRepository {
     // Fetch dynamic interval from DriverConfig (defaulting to 60s during active trips)
     final intervalSeconds = DriverConfigService().config.uploadIntervalSeconds;
 
-    if (_lastUploadTime == null ||
-        now.difference(_lastUploadTime!).inSeconds >= intervalSeconds) {
+    final lastTime = _lastUploadTime;
+    if (lastTime == null ||
+        now.difference(lastTime).inSeconds >= intervalSeconds) {
       _lastUploadTime = now;
       final speedKmh = position.speed < 0 ? null : position.speed * 3.6;
 

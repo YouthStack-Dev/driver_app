@@ -43,12 +43,13 @@ class DeviceService {
       _logger.e('Error getting device info: $e');
     }
 
-    return {
+    final data = <String, dynamic>{
       'android_id': androidId ?? 'unknown_id', 
       'device_model': deviceModel,
       'os_version': osVersion,
       'app_version': appVersion,
-      if (fcmToken != null) 'fcm_token': fcmToken,
     };
+    if (fcmToken != null) data['fcm_token'] = fcmToken;
+    return data;
   }
 }

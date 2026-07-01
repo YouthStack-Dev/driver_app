@@ -59,7 +59,7 @@ class BackgroundTrackingService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_keyRouteId, '');  // Empty → service stops itself
 
-      await _channel.invokeMethod('stopBackgroundTracking');
+      await _channel.invokeMethod('stopBackgroundTracking').timeout(const Duration(seconds: 2));
       _log.i('✅ BackgroundTracking: Kotlin service stopped');
     } catch (e) {
       _log.e('❌ BackgroundTracking stop error: $e');

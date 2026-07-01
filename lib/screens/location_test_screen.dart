@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/location_provider.dart';
-import '../services/firebase_service.dart';
 import '../services/location_service.dart';
 
 class LocationTestScreen extends StatefulWidget {
@@ -13,7 +12,6 @@ class LocationTestScreen extends StatefulWidget {
 
 class _LocationTestScreenState extends State<LocationTestScreen> {
   String _log = "Logs will appear here...\n";
-  bool _testing = false;
 
   void _addLog(String message) {
     if (mounted) {
@@ -116,7 +114,10 @@ class _LocationTestScreenState extends State<LocationTestScreen> {
   Future<void> _testGps() async {
      _addLog("📍 Requesting GPS Location...");
      try {
-       final pos = await LocationService().checkPermission() 
+       if (!mounted) return;
+       final hasPermission = await LocationService().checkPermission();
+       if (!mounted) return;
+       final pos = hasPermission
            ? await Provider.of<LocationProvider>(context, listen: false).getCurrentLocation()
            : null;
            

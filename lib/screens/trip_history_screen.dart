@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
+import 'dart:io';
 import '../services/route_service.dart';
 
 // ─── Same light-theme tokens as RidesScreen ──────────────────────────────────
@@ -20,7 +23,8 @@ class _C {
 }
 
 class TripHistoryScreen extends StatefulWidget {
-  const TripHistoryScreen({super.key});
+  final bool embeddedMode;
+  const TripHistoryScreen({super.key, this.embeddedMode = false});
 
   @override
   State<TripHistoryScreen> createState() => _TripHistoryScreenState();
@@ -38,6 +42,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
   List<dynamic> _bookings = [];
   List<Map<String, dynamic>> _routes = [];
   bool _isLoading = false;
+  bool _isDownloading = false;
   String? _error;
 
   @override
@@ -116,11 +121,11 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
       final isOut = routeCode.toString().toUpperCase().contains('OUT') || 
                     (first['drop_location'] != null && first['pickup_location'] == null);
 
-      final double? distKm = first['actual_total_distance_km'] is num
-          ? (first['actual_total_distance_km'] as num).toDouble()
-          : (first['estimated_total_distance_km'] is num
-              ? (first['estimated_total_distance_km'] as num).toDouble()
-              : null);
+      final double? distKm = 
+          (first['actual_total_distance'] is num ? (first['actual_total_distance'] as num).toDouble() : null) ??
+          (first['actual_total_distance_km'] is num ? (first['actual_total_distance_km'] as num).toDouble() : null) ??
+          (first['estimated_total_distance'] is num ? (first['estimated_total_distance'] as num).toDouble() : null) ??
+          (first['estimated_total_distance_km'] is num ? (first['estimated_total_distance_km'] as num).toDouble() : null);
 
       routeList.add({
         'route_id': rId,
@@ -167,6 +172,40 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     }
   }
 
+  Future<void> _downloadExcel() async {
+    setState(() => _isDownloading = true);
+    try {
+      final dir = await getTemporaryDirectory();
+      final savePath = '${dir.path}/trip_history_${_fmtDate(DateTime.now())}.xlsx';
+      
+      final result = await _routeService.downloadDriverHistoryReport(
+        startDate: _fmtDate(_selectedRange.start),
+        endDate: _fmtDate(_selectedRange.end),
+        savePath: savePath,
+      );
+
+      if (!mounted) return;
+
+      if (result['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Download complete! Opening...')),
+        );
+        await OpenFilex.open(savePath);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result['error'] ?? 'Failed to download report')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -174,7 +213,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     ));
     return Scaffold(
       backgroundColor: _C.bg,
-      appBar: _buildAppBar(),
+      appBar: widget.embeddedMode ? null : _buildAppBar(),
       body: Column(
         children: [
           _buildDateStrip(),
@@ -206,6 +245,22 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
         ],
       ),
       actions: [
+        if (_isDownloading)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Center(
+              child: SizedBox(
+                width: 20, height: 20,
+                child: CircularProgressIndicator(color: _C.green, strokeWidth: 2),
+              ),
+            ),
+          )
+        else
+          IconButton(
+            icon: const Icon(Icons.download_rounded, color: _C.green),
+            tooltip: 'Download Excel',
+            onPressed: _downloadExcel,
+          ),
         IconButton(
           icon: const Icon(Icons.refresh_rounded, color: _C.blue),
           tooltip: 'Refresh',
@@ -223,37 +278,32 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: _pickDateRange,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: _C.bg,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _C.border),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.calendar_today_rounded, size: 14, color: _C.blue),
-                    const SizedBox(width: 10),
-                    Text(_displayRange(_selectedRange),
-                        style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.bold, fontSize: 13, color: _C.textPrimary)),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: _C.textSecondary),
-                  ],
-                ),
-              ),
-            ),
+      child: GestureDetector(
+        onTap: _pickDateRange,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: _C.bg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _C.border),
           ),
-        ],
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.calendar_today_rounded, size: 14, color: _C.blue),
+              const SizedBox(width: 10),
+              Text(_displayRange(_selectedRange),
+                  style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold, fontSize: 13, color: _C.textPrimary)),
+              const SizedBox(width: 6),
+              const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: _C.textSecondary),
+            ],
+          ),
+        ),
       ),
     );
   }
+
 
   Widget _buildSummaryPanel() {
     if (_summary == null || _summary!.isEmpty) return const SizedBox.shrink();
@@ -263,7 +313,23 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     final completed     = _summary!['completed'] ?? 0;
     final noShow        = _summary!['no_show'] ?? 0;
     final cancelled     = _summary!['cancelled'] ?? 0;
-    final totalKm       = _summary!['total_actual_km'] ?? 0.0;
+    final summaryTotal  = _summary!['total_actual_km'] ?? 
+                          _summary!['total_actual_distance'] ?? 
+                          _summary!['total_distance_km'] ?? 
+                          _summary!['total_distance'];
+                          
+    double totalKm = 0.0;
+    if (summaryTotal != null && (summaryTotal as num).toDouble() > 0.0) {
+      totalKm = (summaryTotal as num).toDouble();
+    } else {
+      // Fallback: sum up the distance from individual routes
+      for (final r in _routes) {
+        final dist = r['summary']?['total_distance_km'];
+        if (dist is num) {
+          totalKm += dist.toDouble();
+        }
+      }
+    }
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -273,7 +339,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: _C.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -309,9 +375,9 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
         margin: const EdgeInsets.symmetric(horizontal: 4),
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.05),
+          color: color.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.1)),
+          border: Border.all(color: color.withValues(alpha: 0.1)),
         ),
         child: Column(
           children: [
@@ -373,7 +439,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: _C.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 12, offset: const Offset(0, 3)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 12, offset: const Offset(0, 3)),
         ],
       ),
       child: Column(
@@ -671,9 +737,9 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.07),
+          color: color.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(9),
-          border: Border.all(color: color.withOpacity(0.15)),
+          border: Border.all(color: color.withValues(alpha: 0.15)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

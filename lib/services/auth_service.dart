@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:logger/logger.dart';
 import '../config/constants.dart';
 import 'api_client.dart';
@@ -23,6 +24,7 @@ class AuthService {
   }) async {
     try {
       final cleanDl = dlNumber.trim().toUpperCase();
+      debugPrint('🟠 [AuthService] verifyDevice() entered. DL=$cleanDl');
       _logger.i('Attempting device verification for: $cleanDl');
       _logger.d('🔐 Calling Verify Device: ${ApiEndpoints.deviceVerify}');
       
@@ -30,30 +32,39 @@ class AuthService {
         'dl_number': cleanDl,
         ...deviceData,
       };
+      debugPrint('🟠 [AuthService] Payload: $payload');
+      debugPrint('🟠 [AuthService] POSTing to: ${ApiEndpoints.deviceVerify}');
       
       final response = await _dio.post(ApiEndpoints.deviceVerify, data: payload);
+      debugPrint('🟠 [AuthService] HTTP response status: ${response.statusCode}');
       _logger.d('🔐 Verify Response: ${response.data}');
       final responseData = response.data;
       _logger.d('🔐 Verify Response Type: ${responseData.runtimeType}');
+      debugPrint('🟠 [AuthService] Response data: $responseData');
 
       if (responseData is! Map) {
          _logger.e('❌ Error: Expected Map for response body, got ${responseData.runtimeType}');
+         debugPrint('🟠 [AuthService] ❌ Response is not a Map — returning error');
          return {'success': false, 'error': 'Invalid server response format'};
       }
 
       final data = responseData['data'];
       _logger.d('🔐 Data Type: ${data.runtimeType}');
+      debugPrint('🟠 [AuthService] data field type: ${data.runtimeType}, value: $data');
       
       if (data is List) {
          _logger.e('❌ Error: Expected Map for "data", got List');
+         debugPrint('🟠 [AuthService] ❌ data is a List — invalid format');
          return {'success': false, 'error': 'Invalid server response (Data is List)'};
       }
       
       final Map<String, dynamic> dataMap = (data is Map) ? Map<String, dynamic>.from(data) : {};
+      debugPrint('🟠 [AuthService] dataMap status: ${dataMap["status"]}');
       
       // Validate Status
       if (dataMap['status'] != 'approved') {
          _logger.w('⛔ Device Not Approved: ${dataMap['status']}');
+         debugPrint('🟠 [AuthService] ⛔ Device status is NOT approved: ${dataMap["status"]}');
          return {
            'success': false, 
            'error': responseData['message'] ?? 'Device status is ${dataMap['status']}. Please contact support.',
@@ -63,6 +74,7 @@ class AuthService {
 
       final rawVendors = dataMap['vendors'] as List? ?? [];
       final vendors = rawVendors; // Return all vendors, UI will handle status display
+      debugPrint('🟠 [AuthService] ✅ Device approved. vendors: $vendors');
 
       return {
         'success': true,
@@ -72,9 +84,12 @@ class AuthService {
 
     } on DioException catch (e) {
       _logger.e('Verify failed', error: e);
+      debugPrint('🟠 [AuthService] 💥 DioException: ${e.type} | status=${e.response?.statusCode} | data=${e.response?.data}');
       return _handleError(e);
     } catch (e, stack) {
       _logger.e('Verify unexpected error', error: e, stackTrace: stack);
+      debugPrint('🟠 [AuthService] 💥 Unexpected exception: $e');
+      debugPrint('🟠 [AuthService] StackTrace: $stack');
       return {'success': false, 'error': 'App Error: ${e.toString()}'};
     }
   }
@@ -169,14 +184,16 @@ class AuthService {
 
   /// Step 3: Refresh Token
   Future<Map<String, dynamic>> refreshToken() async {
-    if (_ongoingRefresh != null) {
+    final ongoing = _ongoingRefresh;
+    if (ongoing != null) {
       _logger.i('🔑 Token refresh already in progress, awaiting...');
-      return _ongoingRefresh!;
+      return ongoing;
     }
 
-    _ongoingRefresh = _performTokenRefresh();
+    final newRefresh = _performTokenRefresh();
+    _ongoingRefresh = newRefresh;
     try {
-      final result = await _ongoingRefresh!;
+      final result = await newRefresh;
       return result;
     } finally {
       _ongoingRefresh = null;

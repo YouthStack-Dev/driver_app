@@ -24,7 +24,6 @@ class AuthProvider extends ChangeNotifier {
   Map<String, dynamic>? get currentUser => _currentUser;
 
   // Temp session data
-  String? _tempToken;
   List<dynamic> _accounts = [];
   Map<String, dynamic>? _driver;
   List<dynamic> get vendors  => _accounts;
@@ -128,7 +127,6 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _resolveUnauthenticated() async {
     final tempSession = await _sessionService.getTempSession();
     if (tempSession != null) {
-      _tempToken = tempSession['temp_token'];
       _accounts  = tempSession['accounts'] ?? [];
       _driver    = tempSession['driver'];
       _status    = AuthStatus.tempAuthenticated;
@@ -139,24 +137,40 @@ class AuthProvider extends ChangeNotifier {
 
   // ── verifyDevice ───────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> verifyDevice(String license) async {
+    debugPrint('🟡 [AuthProvider] verifyDevice() called with license: "$license"');
     final deviceData = await _deviceService.getDeviceData();
+    debugPrint('🟡 [AuthProvider] Device data collected: $deviceData');
     final cleanDl = license.trim().toUpperCase();
+    debugPrint('🟡 [AuthProvider] Calling AuthService.verifyDevice for DL: $cleanDl');
     final result = await _authService.verifyDevice(
         dlNumber: cleanDl, deviceData: deviceData);
+    debugPrint('🟡 [AuthProvider] AuthService.verifyDevice result: $result');
 
     if (result['success'] == true) {
       _accounts = result['vendors'] ?? [];
       _driver   = {'license_number': cleanDl};
       _status   = AuthStatus.tempAuthenticated;
+      debugPrint('🟡 [AuthProvider] Saving temp session. vendors count: ${_accounts.length}');
       await _sessionService.setTempSession(
         tempToken: 'verify_stage',
         accounts:  _accounts,
         driver:    _driver,
       );
-      notifyListeners();
+      // ⚠️ Do NOT call notifyListeners() here when there is exactly 1 vendor.
+      // LoginScreen._proceedWithVendorSelection handles the single-vendor case
+      // by calling selectTenant() directly. If we notify here, AuthWrapper
+      // rebuilds and shows VendorSelectScreen which also auto-calls selectTenant,
+      // causing a duplicate concurrent API call → crash / silent logout.
+      if (_accounts.length != 1) {
+        notifyListeners();
+      }
+      debugPrint('🟡 [AuthProvider] Temp session saved. notifyListeners skipped for single-vendor fast-path.');
+    } else {
+      debugPrint('🟡 [AuthProvider] verifyDevice not successful: ${result["error"]}');
     }
     return result;
   }
+
 
   // ── selectTenant ───────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> selectTenant(dynamic vendor, String license) async {
@@ -178,8 +192,14 @@ class AuthProvider extends ChangeNotifier {
     if (result['success'] == true) {
       _currentUser = result['user_data'];
 
-      final token    = result['access_token'];
+      // Extract and cache the driver profile so name/photo are available immediately
       final userData = result['user_data'];
+      _driver = userData?['driver'] ??
+                userData?['user']?['driver'] ??
+                _driver; // fallback to existing if not present
+
+      final token = result['access_token'];
+
 
       // Also write to SharedPreferences for legacy screens that read from prefs
       final prefs = await SharedPreferences.getInstance();
@@ -280,7 +300,6 @@ class AuthProvider extends ChangeNotifier {
     await _sessionService.clearTempSession();
 
     _currentUser = null;
-    _tempToken   = null;
     _status      = AuthStatus.unauthenticated;
 
     notifyListeners();

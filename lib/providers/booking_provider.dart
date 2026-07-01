@@ -5,6 +5,7 @@ import 'auth_provider.dart';
 import '../services/overlay_service.dart';
 import '../services/background_tracking_service.dart';
 import '../services/session_service.dart';
+import '../services/navigation_service.dart';
 
 class BookingProvider extends ChangeNotifier {
   final RouteService _routeService = RouteService();
@@ -26,22 +27,42 @@ class BookingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> fetchTrips({String status = 'upcoming'}) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> fetchTrips({String status = 'upcoming', bool showLoading = true}) async {
+    if (showLoading) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     try {
       final result = await _routeService.getDriverTrips(statusFilter: status);
       if (result['success'] == true) {
         _routes = result['routes'] ?? [];
+        
+        // Safety catch: If backend says there are no ongoing trips, 
+        // ensure background tracking and overlays are stopped to prevent ghost notifications.
+        if (status == 'ongoing' && _routes.isEmpty) {
+          await SessionService().clearActiveRoute();
+          await SessionService().setTrackingEnabled(false);
+          await BackgroundTrackingService().stopBackgroundTracking();
+          await OverlayService().hideOverlay();
+        }
       } else {
-        _error = result['error'];
+        final errorCode = result['errorCode']?.toString() ?? '';
+        // 401/403 = session invalid — force logout immediately
+        if (errorCode == 'UNAUTHORIZED' || errorCode == 'FORBIDDEN') {
+          await SessionService().clearSession();
+          NavigationService.navigateTo('/login');
+          return;
+        }
+        if (showLoading) _error = result['error'];
       }
     } catch (e) {
-      _error = e.toString();
+      if (showLoading) _error = 'Unable to load routes. Please try again.';
     } finally {
-      _isLoading = false;
+      if (showLoading) {
+        _isLoading = false;
+      }
       notifyListeners();
     }
   }
@@ -89,6 +110,7 @@ class BookingProvider extends ChangeNotifier {
     try {
       final result = await _routeService.cancelBooking(bookingId);
       if (result['success'] == true) {
+        if (!context.mounted) return false;
         await fetchBookings(context);
         return true;
       } else {
@@ -145,22 +167,40 @@ class BookingProvider extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> startTrip(String routeId, String bookingId, String? otp, double lat, double lng) async {
-    return _performAction(() => _routeService.startTrip(
-      routeId: routeId, 
-      bookingId: bookingId, 
-      otp: otp, 
-      latitude: lat, 
-      longitude: lng
-    ));
-  }
+    // Generate a stable idempotency key per tap.
+    // Format: pickup-{routeId}-{bookingId}-{epochSeconds}
+    // Retrying from a network error with the same key is safe — the backend
+    // will return the already-recorded stop event instead of creating a duplicate.
+    final idempotencyKey =
+        'pickup-$routeId-$bookingId-${DateTime.now().millisecondsSinceEpoch ~/ 1000}';
+    final deviceTimestamp = DateTime.now().toUtc().toIso8601String();
 
-  Future<Map<String, dynamic>> dropTrip(String routeId, String bookingId, String? otp, double lat, double lng) async {
-     return _performAction(() => _routeService.dropTrip(
+    return _performAction(() => _routeService.startTrip(
       routeId: routeId,
       bookingId: bookingId,
       otp: otp,
       latitude: lat,
-      longitude: lng
+      longitude: lng,
+      idempotencyKey: idempotencyKey,
+      deviceTimestamp: deviceTimestamp,
+    ));
+  }
+
+  Future<Map<String, dynamic>> dropTrip(String routeId, String bookingId, String? otp, double lat, double lng) async {
+    // Generate a stable idempotency key per tap.
+    // Format: drop-{routeId}-{bookingId}-{epochSeconds}
+    final idempotencyKey =
+        'drop-$routeId-$bookingId-${DateTime.now().millisecondsSinceEpoch ~/ 1000}';
+    final deviceTimestamp = DateTime.now().toUtc().toIso8601String();
+
+    return _performAction(() => _routeService.dropTrip(
+      routeId: routeId,
+      bookingId: bookingId,
+      otp: otp,
+      latitude: lat,
+      longitude: lng,
+      idempotencyKey: idempotencyKey,
+      deviceTimestamp: deviceTimestamp,
     ));
   }
 
@@ -191,9 +231,11 @@ class BookingProvider extends ChangeNotifier {
     ));
   }
 
-  Future<Map<String, dynamic>> endDuty(String routeId, String? reason) async {
-    _isLoading = true;
-    notifyListeners();
+  Future<Map<String, dynamic>> endDuty(String routeId, String? reason, {bool showLoading = true}) async {
+    if (showLoading) {
+      _isLoading = true;
+      notifyListeners();
+    }
     try {
       final result = await _routeService.endDuty(routeId, reason);
       
@@ -248,19 +290,20 @@ class BookingProvider extends ChangeNotifier {
         }
 
         // Refresh to upcoming
-        await fetchTrips(status: 'upcoming');
+        await fetchTrips(status: 'upcoming', showLoading: showLoading);
 
-        return {
-          'success': true,
-          if (summaryData != null) 'summary': summaryData,
-        };
+        final Map<String, dynamic> response = {'success': true};
+        if (summaryData != null) response['summary'] = summaryData;
+        return response;
       } else {
-        _error = result['error'];
+        if (showLoading) _error = result['error'];
       }
       return result;
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (showLoading) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 

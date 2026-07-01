@@ -19,8 +19,9 @@ class SpeedViolationService {
   DateTime? _lastReportedAt;
 
   bool get _isCoolingDown {
-    if (_lastReportedAt == null) return false;
-    return DateTime.now().difference(_lastReportedAt!).inSeconds <
+    final last = _lastReportedAt;
+    if (last == null) return false;
+    return DateTime.now().difference(last).inSeconds <
         _cooldownSeconds;
   }
 
@@ -41,7 +42,8 @@ class SpeedViolationService {
 
     // Stamp the time before the async call so rapid concurrent invocations
     // all see the cooldown immediately.
-    _lastReportedAt = DateTime.now();
+    final now = DateTime.now();
+    _lastReportedAt = now;
 
     try {
       final payload = {
@@ -50,7 +52,7 @@ class SpeedViolationService {
         'speed_limit_kmph': speedLimitKmph,
         'latitude': latitude,
         'longitude': longitude,
-        'recorded_at': _lastReportedAt!.toUtc().toIso8601String(),
+        'recorded_at': now.toUtc().toIso8601String(),
       };
 
       final response = await _apiClient.client

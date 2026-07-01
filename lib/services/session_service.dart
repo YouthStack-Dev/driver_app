@@ -14,7 +14,7 @@ class SessionService {
   static const String _trackingEnabledKey = 'tracking_enabled';
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(),
   );
 
   // Singleton

@@ -26,16 +26,16 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
     final String currentKey = (currentTenantId != null && currentVendorId != null) ? '$currentVendorId:$currentTenantId' : '';
 
     return Scaffold(
-      backgroundColor: const Color(0xFF051424),
+      backgroundColor: const Color(0xFFF4F6FA),
       appBar: AppBar(
         title: Text(
           'Switch Company',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFFD4E4FA)),
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFF111827)),
         ),
-        backgroundColor: const Color(0xFF122131),
+        backgroundColor: const Color(0xFFFFFFFF),
         elevation: 0,
         centerTitle: true,
-        iconTheme: const IconThemeData(color: Color(0xFFD4E4FA)),
+        iconTheme: const IconThemeData(color: Color(0xFF111827)),
       ),
       body: Stack(
         children: [
@@ -48,7 +48,7 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
               height: 320,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF2E7CFF).withOpacity(0.05),
+                color: const Color(0xFF2E7CFF).withValues(alpha: 0.05),
               ),
             ),
           ),
@@ -60,7 +60,7 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
               height: 240,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF2E7CFF).withOpacity(0.03),
+                color: const Color(0xFF2E7CFF).withValues(alpha: 0.03),
               ),
             ),
           ),
@@ -136,17 +136,17 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
         child: Container(
           margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(
-            color: const Color(0xFF122131),
+            color: const Color(0xFFFFFFFF),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: isCurrent 
-                  ? const Color(0xFF10B981).withOpacity(0.5) 
-                  : (isSelected ? const Color(0xFF2E7CFF) : const Color(0xFF334155)),
+                  ? const Color(0xFF10B981).withValues(alpha: 0.5) 
+                  : (isSelected ? const Color(0xFF2E7CFF) : const Color(0xFFE8ECF4)),
               width: isCurrent || isSelected ? 1.5 : 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.12),
+                color: Colors.black.withValues(alpha: 0.12),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               )
@@ -160,7 +160,7 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
                   left: BorderSide(
                     color: isCurrent 
                         ? const Color(0xFF10B981) 
-                        : (isActive ? const Color(0xFF2E7CFF) : const Color(0xFF334155)),
+                        : (isActive ? const Color(0xFF2E7CFF) : const Color(0xFFE8ECF4)),
                     width: 5,
                   ),
                 ),
@@ -174,8 +174,8 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
                     height: 44,
                     decoration: BoxDecoration(
                       color: isCurrent 
-                          ? const Color(0xFF10B981).withOpacity(0.12) 
-                          : (isActive ? const Color(0xFF2E7CFF).withOpacity(0.12) : const Color(0xFF1E293B)),
+                          ? const Color(0xFF10B981).withValues(alpha: 0.12) 
+                          : (isActive ? const Color(0xFF2E7CFF).withValues(alpha: 0.12) : const Color(0xFFE8ECF4)),
                       shape: BoxShape.circle
                     ),
                     child: Icon(
@@ -201,7 +201,7 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
                                 style: GoogleFonts.poppins(
                                   fontWeight: FontWeight.bold, 
                                   fontSize: 15,
-                                  color: isActive ? const Color(0xFFD4E4FA) : const Color(0xFF64748B),
+                                  color: isActive ? const Color(0xFF111827) : const Color(0xFF64748B),
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -231,7 +231,7 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
                         Text(
                           tenantName, 
                           style: GoogleFonts.poppins(
-                            color: const Color(0xFFC2C6D7), 
+                            color: const Color(0xFF6B7280), 
                             fontSize: 12.5,
                             fontWeight: FontWeight.w500,
                           ),
@@ -289,7 +289,7 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
                       padding: const EdgeInsets.only(left: 10),
                       child: Icon(
                         Icons.arrow_forward_ios_rounded, 
-                        color: isActive ? const Color(0xFF2E7CFF) : const Color(0xFF334155),
+                        color: isActive ? const Color(0xFF2E7CFF) : const Color(0xFFE8ECF4),
                         size: 13,
                       ),
                     )
@@ -312,22 +312,22 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: const Color(0xFF122131),
+                color: const Color(0xFFFFFFFF),
                 shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFF334155)),
+                border: Border.all(color: const Color(0xFFE8ECF4)),
               ),
               child: const Icon(Icons.business_outlined, size: 56, color: Color(0xFF64748B)),
             ),
             const SizedBox(height: 20),
             Text(
               'No alternate accounts',
-              style: GoogleFonts.poppins(fontSize: 16.5, fontWeight: FontWeight.bold, color: const Color(0xFFD4E4FA)),
+              style: GoogleFonts.poppins(fontSize: 16.5, fontWeight: FontWeight.bold, color: const Color(0xFF111827)),
             ),
             const SizedBox(height: 8),
             Text(
               'You are not registered under any other operators.',
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(color: const Color(0xFFC2C6D7), fontSize: 13.5, height: 1.4),
+              style: GoogleFonts.poppins(color: const Color(0xFF6B7280), fontSize: 13.5, height: 1.4),
             ),
             const SizedBox(height: 28),
             Container(
@@ -380,12 +380,9 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
 
     try {
       final auth = Provider.of<AuthProvider>(context, listen: false);
-      print('UI: Calling switchCompany...');
       final result = await auth.switchCompany(account);
-      print('UI: switchCompany result: $result');
       
       if (!mounted) {
-        print('UI: Widget unmounted after switch');
         return;
       }
 
@@ -399,7 +396,7 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
              context: context,
              barrierDismissible: false,
              builder: (ctx) => AlertDialog(
-               backgroundColor: const Color(0xFF122131),
+               backgroundColor: const Color(0xFFFFFFFF),
                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                title: Row(
                  children: [
@@ -407,13 +404,13 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
                    const SizedBox(width: 8),
                    Text(
                      'Company Switched', 
-                     style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 17, color: const Color(0xFFD4E4FA)),
+                     style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 17, color: const Color(0xFF111827)),
                    ),
                  ],
                ),
                content: Text(
                  'Successfully switched active session to ${account['vendor_name'] ?? account['vendor']?['name'] ?? 'selected operator'}.',
-                 style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFFC2C6D7), height: 1.4),
+                 style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF6B7280), height: 1.4),
                ),
                actions: [
                  TextButton(
@@ -429,7 +426,6 @@ class _SwitchAccountScreenState extends State<SwitchAccountScreen> {
              )
            );
            
-           print('UI: Dialog result received. Navigating to Home...');
            if (mounted) {
               Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
            }

@@ -44,28 +44,22 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF051424),
+      backgroundColor: const Color(0xFFF4F6FA),
       appBar: AppBar(
         title: Text(
           'My Schedules',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFFD4E4FA)),
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFF111827)),
         ),
-        backgroundColor: const Color(0xFF122131),
+        backgroundColor: const Color(0xFFFFFFFF),
         elevation: 0,
         centerTitle: true,
-        iconTheme: const IconThemeData(color: Color(0xFFD4E4FA)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: Color(0xFF2E7CFF)),
-            onPressed: _fetchBookings,
-          )
-        ],
+        iconTheme: const IconThemeData(color: Color(0xFF111827)),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
+              color: const Color(0xFFE8ECF4),
               borderRadius: BorderRadius.circular(14),
             ),
             child: TabBar(
@@ -99,7 +93,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
               height: 320,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF2E7CFF).withOpacity(0.04),
+                color: const Color(0xFF2E7CFF).withValues(alpha: 0.04),
               ),
             ),
           ),
@@ -111,7 +105,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
               height: 240,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF2E7CFF).withOpacity(0.02),
+                color: const Color(0xFF2E7CFF).withValues(alpha: 0.02),
               ),
             ),
           ),
@@ -134,9 +128,9 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                     child: Container(
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF122131),
+                        color: const Color(0xFFFFFFFF),
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: const Color(0xFFFFB4AB).withOpacity(0.2)),
+                        border: Border.all(color: const Color(0xFFFFB4AB).withValues(alpha: 0.2)),
                       ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -144,7 +138,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                           Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFFB4AB).withOpacity(0.1),
+                              color: const Color(0xFFFFB4AB).withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(Icons.error_outline_rounded, color: Color(0xFFFFB4AB), size: 36),
@@ -152,13 +146,13 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                           const SizedBox(height: 16),
                           Text(
                             'Failed to load schedules',
-                            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16, color: const Color(0xFFD4E4FA)),
+                            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16, color: const Color(0xFF111827)),
                           ),
                           const SizedBox(height: 8),
                           Text(
                             provider.error!,
                             textAlign: TextAlign.center,
-                            style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFFC2C6D7)),
+                            style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF6B7280)),
                           ),
                           const SizedBox(height: 20),
                           ElevatedButton.icon(
@@ -199,8 +193,12 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
 
     if (bookings.isEmpty) {
       final now = DateTime.now();
-      return Center(
+      return RefreshIndicator(
+        onRefresh: _fetchBookings,
+        color: const Color(0xFF2E7CFF),
+        backgroundColor: Colors.white,
         child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
           child: Padding(
             padding: const EdgeInsets.all(32.0),
             child: Column(
@@ -211,9 +209,9 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                   width: 90,
                   height: 95,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF122131),
+                    color: const Color(0xFFFFFFFF),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF334155)),
+                    border: Border.all(color: const Color(0xFFE8ECF4)),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black26,
@@ -250,7 +248,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                             style: GoogleFonts.poppins(
                               fontSize: 34, 
                               fontWeight: FontWeight.bold, 
-                              color: const Color(0xFFD4E4FA),
+                              color: const Color(0xFF111827),
                               height: 1.0,
                             ),
                           ),
@@ -265,7 +263,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                   style: GoogleFonts.poppins(
                     fontSize: 18, 
                     fontWeight: FontWeight.bold, 
-                    color: const Color(0xFFD4E4FA),
+                    color: const Color(0xFF111827),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -274,7 +272,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                   child: Text(
                     'Your assigned routes and bookings for this list will appear here.',
                     textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(color: const Color(0xFFC2C6D7), fontSize: 13, height: 1.4),
+                    style: GoogleFonts.poppins(color: const Color(0xFF6B7280), fontSize: 13, height: 1.4),
                   ),
                 ),
               ],
@@ -284,10 +282,15 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
       );
     }
 
-    return AnimationLimiter(
-      child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        itemCount: bookings.length,
+    return RefreshIndicator(
+      onRefresh: _fetchBookings,
+      color: const Color(0xFF2E7CFF),
+      backgroundColor: Colors.white,
+      child: AnimationLimiter(
+        child: ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          itemCount: bookings.length,
         itemBuilder: (context, index) {
           final booking = bookings[index];
           return AnimationConfiguration.staggeredList(
@@ -302,6 +305,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
           );
         },
       ),
+      ),
     );
   }
 
@@ -311,19 +315,19 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
     final date = booking['booking_date'] ?? 'N/A';
     
     Color statusTextColor = Colors.grey;
-    Color statusBgColor = const Color(0xFF1E293B);
+    Color statusBgColor = const Color(0xFFE8ECF4);
     if (['Ongoing', 'Scheduled'].contains(status)) {
       statusTextColor = const Color(0xFF10B981);
-      statusBgColor = const Color(0xFF10B981).withOpacity(0.12);
+      statusBgColor = const Color(0xFF10B981).withValues(alpha: 0.12);
     } else if (status == 'Request') {
       statusTextColor = const Color(0xFFF59E0B);
-      statusBgColor = const Color(0xFFF59E0B).withOpacity(0.12);
+      statusBgColor = const Color(0xFFF59E0B).withValues(alpha: 0.12);
     } else if (status == 'Rejected' || status == 'Cancelled') {
       statusTextColor = const Color(0xFFEF4444);
-      statusBgColor = const Color(0xFFEF4444).withOpacity(0.12);
+      statusBgColor = const Color(0xFFEF4444).withValues(alpha: 0.12);
     } else if (status == 'Completed') {
       statusTextColor = const Color(0xFF3B82F6);
-      statusBgColor = const Color(0xFF3B82F6).withOpacity(0.12);
+      statusBgColor = const Color(0xFF3B82F6).withValues(alpha: 0.12);
     }
 
     bool canCancel = status == 'Request' || status == 'Approved' || status == 'Scheduled';
@@ -331,12 +335,12 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF122131),
+        color: const Color(0xFFFFFFFF),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF334155), width: 1),
+        border: Border.all(color: const Color(0xFFE8ECF4), width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 15,
             offset: const Offset(0, 4),
           ),
@@ -359,7 +363,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.bold, 
                         fontSize: 15.5,
-                        color: const Color(0xFFD4E4FA),
+                        color: const Color(0xFF111827),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -370,7 +374,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                         Text(
                           date, 
                           style: GoogleFonts.poppins(
-                            color: const Color(0xFFC2C6D7), 
+                            color: const Color(0xFF6B7280), 
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
                           ),
@@ -384,7 +388,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                   decoration: BoxDecoration(
                     color: statusBgColor,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: statusTextColor.withOpacity(0.3), width: 0.8),
+                    border: Border.all(color: statusTextColor.withValues(alpha: 0.3), width: 0.8),
                   ),
                   child: Text(
                     status.toUpperCase(), 
@@ -399,7 +403,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
               ],
             ),
             const SizedBox(height: 14),
-            const Divider(thickness: 1.0, color: Color(0xFF334155)),
+            const Divider(thickness: 1.0, color: Color(0xFFE8ECF4)),
             const SizedBox(height: 14),
             
             // Pickup to Drop Timeline Routing Layout
@@ -415,7 +419,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                       Container(
                         width: 1.5,
                         height: 38,
-                        color: const Color(0xFF334155),
+                        color: const Color(0xFFE8ECF4),
                       ),
                       const Icon(Icons.place_rounded, color: Color(0xFFEF4444), size: 14),
                     ],
@@ -434,7 +438,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                         const SizedBox(height: 2),
                         Text(
                           booking['pickup_location'] ?? 'N/A', 
-                          style: GoogleFonts.poppins(fontSize: 12.5, fontWeight: FontWeight.w600, color: const Color(0xFFD4E4FA)),
+                          style: GoogleFonts.poppins(fontSize: 12.5, fontWeight: FontWeight.w600, color: const Color(0xFF111827)),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -448,7 +452,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                         const SizedBox(height: 2),
                         Text(
                           booking['drop_location'] ?? 'N/A', 
-                          style: GoogleFonts.poppins(fontSize: 12.5, fontWeight: FontWeight.w600, color: const Color(0xFFD4E4FA)),
+                          style: GoogleFonts.poppins(fontSize: 12.5, fontWeight: FontWeight.w600, color: const Color(0xFF111827)),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -466,9 +470,9 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2E7CFF).withOpacity(0.08),
+                  color: const Color(0xFF2E7CFF).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF2E7CFF).withOpacity(0.2), width: 1),
+                  border: Border.all(color: const Color(0xFF2E7CFF).withValues(alpha: 0.2), width: 1),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -509,10 +513,10 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
                   label: Text('Cancel Booking', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13)),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFFEF4444),
-                    side: BorderSide(color: const Color(0xFFEF4444).withOpacity(0.4), width: 1.2),
+                    side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.4), width: 1.2),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    backgroundColor: const Color(0xFFEF4444).withOpacity(0.04),
+                    backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.04),
                   ),
                 ),
               )
@@ -534,7 +538,7 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
     bool? confirm = await showDialog(
       context: context,
       builder: (c) => AlertDialog(
-        backgroundColor: const Color(0xFF122131),
+        backgroundColor: const Color(0xFFFFFFFF),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
@@ -542,13 +546,13 @@ class _SchedulesScreenState extends State<SchedulesScreen> with SingleTickerProv
             const SizedBox(width: 8),
             Text(
               'Cancel Booking', 
-              style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 17, color: const Color(0xFFD4E4FA)),
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 17, color: const Color(0xFF111827)),
             ),
           ],
         ),
         content: Text(
           'Are you sure you want to cancel this booking?',
-          style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFFC2C6D7)),
+          style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF6B7280)),
         ),
         actions: [
           TextButton(

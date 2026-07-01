@@ -46,6 +46,10 @@ class OverlayService {
   /// Hide the floating overlay
   Future<void> hideOverlay() async {
     _logger.i('Hiding overlay...');
-    await FlutterOverlayWindow.closeOverlay();
+    try {
+      await FlutterOverlayWindow.closeOverlay().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      _logger.w('Failed to close overlay or timed out: $e');
+    }
   }
 }

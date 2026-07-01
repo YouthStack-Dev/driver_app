@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/auth_provider.dart';
+import '../services/driver_config_service.dart';
 
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key});
+  final bool embeddedMode;
+  const ProfileScreen({super.key, this.embeddedMode = false});
 
   @override
   Widget build(BuildContext context) {
@@ -15,17 +17,17 @@ class ProfileScreen extends StatelessWidget {
     final tenant = userData['tenant'] ?? userData['user']?['tenant'] ?? {};
     
     return Scaffold(
-      backgroundColor: const Color(0xFF051424),
-      appBar: AppBar(
+      backgroundColor: const Color(0xFFF4F6FA),
+      appBar: embeddedMode ? null : AppBar(
         title: Text(
           'My Profile', 
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFFD4E4FA))
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFF111827))
         ),
         elevation: 0,
-        backgroundColor: const Color(0xFF122131),
-        foregroundColor: const Color(0xFFD4E4FA),
+        backgroundColor: const Color(0xFFFFFFFF),
+        foregroundColor: const Color(0xFF111827),
         centerTitle: true,
-        iconTheme: const IconThemeData(color: Color(0xFFD4E4FA)),
+        iconTheme: const IconThemeData(color: Color(0xFF111827)),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -85,104 +87,117 @@ class ProfileScreen extends StatelessWidget {
             
             _buildSection(
               context, 
-              title: 'Settings & Actions', 
-              icon: Icons.settings_outlined,
+              title: 'System Configuration', 
+              icon: Icons.settings_system_daydream_outlined,
               children: [
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () {
-                      Navigator.pushNamed(context, '/switch-account');
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2E7CFF).withOpacity(0.1),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFF2E7CFF).withOpacity(0.2)),
-                            ),
-                            child: const Icon(Icons.swap_horiz_rounded, color: Color(0xFF2E7CFF), size: 20),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Switch Company', 
-                                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 14, color: const Color(0xFFD4E4FA))
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Toggle between your assigned corporate fleet entities', 
-                                  style: GoogleFonts.poppins(fontSize: 11, color: const Color(0xFFC2C6D7))
-                                ),
-                              ],
-                            ),
-                          ),
-                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFF334155)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () async {
-                      await auth.logout();
-                      if (context.mounted) {
-                        Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
-                      }
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEF4444).withOpacity(0.1),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.2)),
-                            ),
-                            child: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 20),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Log Out', 
-                                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 14, color: const Color(0xFFEF4444))
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Sign out of your active session securely', 
-                                  style: GoogleFonts.poppins(fontSize: 11, color: const Color(0xFFC2C6D7))
-                                ),
-                              ],
-                            ),
-                          ),
-                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFF334155)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+                _buildInfoRow('Speed Limit', '${DriverConfigService().config.speedLimitKmph.toInt()} km/h'),
+                _buildInfoRow('Upload Interval', '${DriverConfigService().config.uploadIntervalSeconds}s'),
+                _buildInfoRow('Login OTP (Boarding)', DriverConfigService().config.loginBoardingOtp ? 'Yes' : 'No'),
+                _buildInfoRow('Login OTP (Deboarding)', DriverConfigService().config.loginDeboardingOtp ? 'Yes' : 'No'),
+                _buildInfoRow('Logout OTP (Boarding)', DriverConfigService().config.logoutBoardingOtp ? 'Yes' : 'No'),
+                _buildInfoRow('Logout OTP (Deboarding)', DriverConfigService().config.logoutDeboardingOtp ? 'Yes' : 'No'),
+                _buildInfoRow('Women Escort Required', DriverConfigService().config.escortRequiredForWomen ? 'Yes (${DriverConfigService().config.escortRequiredStartTime} - ${DriverConfigService().config.escortRequiredEndTime})' : 'No'),
               ],
             ),
             
+            const SizedBox(height: 24),
+            _buildLogoutButton(context),
             const SizedBox(height: 40),
+
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton(BuildContext context) {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: GestureDetector(
+        onTap: () async {
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (_) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              backgroundColor: Colors.white,
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.logout_rounded, color: Color(0xFFDC2626), size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('Log Out',
+                      style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 17,
+                          color: const Color(0xFF111827))),
+                ],
+              ),
+              content: Text(
+                'Are you sure you want to log out of the app?',
+                style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF6B7280), height: 1.5),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text('Cancel',
+                      style: GoogleFonts.poppins(
+                          color: const Color(0xFF6B7280), fontWeight: FontWeight.w600)),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: Text('Log Out',
+                      style: GoogleFonts.poppins(
+                          color: const Color(0xFFDC2626), fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
+          if (confirmed == true && context.mounted) {
+            await auth.logout();
+            if (context.mounted) {
+              Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+            }
+          }
+        },
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFFDC2626), Color(0xFFB91C1C)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFDC2626).withValues(alpha: 0.30),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.logout_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Text(
+                'Log Out',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -197,15 +212,11 @@ class ProfileScreen extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
-        ),
+        color: Colors.white,
         borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black26,
+            color: Color(0x0C000000),
             blurRadius: 15,
             offset: Offset(0, 8),
           ),
@@ -219,17 +230,17 @@ class ProfileScreen extends StatelessWidget {
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: const Color(0xFF2E7CFF).withOpacity(0.2),
+              color: const Color(0xFF2E7CFF).withValues(alpha: 0.2),
             ),
             child: Container(
               padding: const EdgeInsets.all(3),
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
-                color: Color(0xFF0F172A),
+                color: Color(0xFF1E6BFF),
               ),
               child: CircleAvatar(
                 radius: 46,
-                backgroundColor: const Color(0xFF122131),
+                backgroundColor: const Color(0xFFFFFFFF),
                 backgroundImage: driver['photo_url'] != null ? NetworkImage(driver['photo_url']) : null,
                 child: driver['photo_url'] == null 
                     ? Text(
@@ -253,7 +264,7 @@ class ProfileScreen extends StatelessWidget {
             style: GoogleFonts.poppins(
               fontSize: 21, 
               fontWeight: FontWeight.bold, 
-              color: const Color(0xFFD4E4FA),
+              color: const Color(0xFF111827),
             )
           ),
           
@@ -264,16 +275,16 @@ class ProfileScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFF2E7CFF).withOpacity(0.12),
+                color: const Color(0xFF2E7CFF).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF2E7CFF).withOpacity(0.2)),
+                border: Border.all(color: const Color(0xFF2E7CFF).withValues(alpha: 0.2)),
               ),
               child: Text(
                 code, 
                 style: GoogleFonts.poppins(
                   fontSize: 11.5, 
                   fontWeight: FontWeight.bold, 
-                  color: const Color(0xFFD4E4FA),
+                  color: const Color(0xFF111827),
                   letterSpacing: 0.5
                 )
               ),
@@ -285,7 +296,7 @@ class ProfileScreen extends StatelessWidget {
               tenantName, 
               style: GoogleFonts.poppins(
                 fontSize: 13, 
-                color: const Color(0xFFC2C6D7),
+                color: const Color(0xFF6B7280),
                 fontWeight: FontWeight.w500
               )
             ),
@@ -300,12 +311,12 @@ class ProfileScreen extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF122131),
+        color: const Color(0xFFFFFFFF),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF334155), width: 1),
+        border: Border.all(color: const Color(0xFFE8ECF4), width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -323,13 +334,13 @@ class ProfileScreen extends StatelessWidget {
                 style: GoogleFonts.poppins(
                   fontSize: 15.5, 
                   fontWeight: FontWeight.bold, 
-                  color: const Color(0xFFD4E4FA)
+                  color: const Color(0xFF111827)
                 )
               ),
             ],
           ),
           const SizedBox(height: 10),
-          const Divider(thickness: 1.0, color: Color(0xFF334155)),
+          const Divider(thickness: 1.0, color: Color(0xFFE8ECF4)),
           const SizedBox(height: 6),
           ...children,
         ],
@@ -347,14 +358,14 @@ class ProfileScreen extends StatelessWidget {
             flex: 2, 
             child: Text(
               label, 
-              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFFC2C6D7), fontWeight: FontWeight.w500)
+              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF6B7280), fontWeight: FontWeight.w500)
             )
           ),
           Expanded(
             flex: 3, 
             child: Text(
               value ?? 'N/A', 
-              style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFFD4E4FA)), 
+              style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF111827)), 
               textAlign: TextAlign.right
             )
           ),
@@ -380,20 +391,20 @@ class ProfileScreen extends StatelessWidget {
 
   Widget _buildDocRow(String label, String? status, String? expiry) {
     Color badgeTextColor = Colors.grey;
-    Color badgeBgColor = const Color(0xFF1E293B);
+    Color badgeBgColor = const Color(0xFF2E7CFF);
     IconData statusIcon = Icons.help_outline;
 
     if (status == 'Approved') {
       badgeTextColor = const Color(0xFF10B981);
-      badgeBgColor = const Color(0xFF10B981).withOpacity(0.12);
+      badgeBgColor = const Color(0xFF10B981).withValues(alpha: 0.12);
       statusIcon = Icons.check_circle_outline;
     } else if (status == 'Pending') {
       badgeTextColor = const Color(0xFFF59E0B);
-      badgeBgColor = const Color(0xFFF59E0B).withOpacity(0.12);
+      badgeBgColor = const Color(0xFFF59E0B).withValues(alpha: 0.12);
       statusIcon = Icons.hourglass_empty;
     } else if (status == 'Rejected' || status == 'Expired') {
       badgeTextColor = const Color(0xFFEF4444);
-      badgeBgColor = const Color(0xFFEF4444).withOpacity(0.12);
+      badgeBgColor = const Color(0xFFEF4444).withValues(alpha: 0.12);
       statusIcon = Icons.error_outline;
     }
 
@@ -405,7 +416,7 @@ class ProfileScreen extends StatelessWidget {
           Expanded(
             child: Text(
               label, 
-              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFFC2C6D7), fontWeight: FontWeight.w500)
+              style: GoogleFonts.poppins(fontSize: 13, color: const Color(0xFF6B7280), fontWeight: FontWeight.w500)
             )
           ),
           Column(
@@ -416,7 +427,7 @@ class ProfileScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: badgeBgColor,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: badgeTextColor.withOpacity(0.3), width: 0.8),
+                  border: Border.all(color: badgeTextColor.withValues(alpha: 0.3), width: 0.8),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,

@@ -5,11 +5,11 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/booking_provider.dart';
 import '../providers/location_provider.dart';
+import '../providers/auth_provider.dart';
 import '../services/permission_service.dart';
+import '../widgets/app_drawer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'chat_screen.dart';
-import 'trip_history_screen.dart';
-
 // ─── Light Theme Color Tokens ────────────────────────────────────────────────
 class _C {
   static const bg         = Color(0xFFF4F6FA);   // Page background
@@ -30,7 +30,8 @@ class _C {
 }
 
 class RidesScreen extends StatefulWidget {
-  const RidesScreen({super.key});
+  final bool embeddedMode;
+  const RidesScreen({super.key, this.embeddedMode = false});
 
   @override
   State<RidesScreen> createState() => _RidesScreenState();
@@ -42,13 +43,7 @@ class _RidesScreenState extends State<RidesScreen> {
   @override
   void initState() {
     super.initState();
-    print('UI: RidesScreen (Home) initState called');
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      print('UI: RidesScreen postFrameCallback - fetching trips');
-
-      if (!mounted) return;
-      await PermissionService().checkAndRequestAllPermissions(context);
-
       if (!mounted) return;
       final provider = Provider.of<BookingProvider>(context, listen: false);
       provider.clearData();
@@ -76,7 +71,8 @@ class _RidesScreenState extends State<RidesScreen> {
 
     return Scaffold(
       backgroundColor: _C.bg,
-      appBar: _buildAppBar(),
+      appBar: widget.embeddedMode ? null : _buildAppBar(),
+      drawer: widget.embeddedMode ? null : const AppDrawer(),
       body: Consumer<LocationProvider>(
         builder: (context, locationProvider, _) {
           return Stack(
@@ -168,11 +164,7 @@ class _RidesScreenState extends State<RidesScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              _greeting(),
-              style: GoogleFonts.poppins(
-                  color: _C.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
-            ),
+            _buildGreetingArea(),
             Text(
               "Today's Ride",
               style: GoogleFonts.poppins(
@@ -185,41 +177,84 @@ class _RidesScreenState extends State<RidesScreen> {
         preferredSize: const Size.fromHeight(1),
         child: Container(color: _C.border, height: 1),
       ),
-      leading: IconButton(
-        icon: const Icon(Icons.history_rounded, color: _C.textPrimary),
-        tooltip: 'Trip History',
-        onPressed: () => Navigator.push(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => const TripHistoryScreen(),
-            transitionsBuilder: (_, animation, __, child) =>
-                SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(-1, 0), end: Offset.zero,
-                  ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
-                  child: child,
-                ),
-            transitionDuration: const Duration(milliseconds: 300),
-          ),
+    );
+  }
+
+  Widget _buildGreetingArea() {
+    final auth = Provider.of<AuthProvider>(context);
+    final accounts = auth.accounts;
+    
+    Widget greetingText = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          _greeting(),
+          style: GoogleFonts.poppins(
+              color: _C.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
         ),
-      ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.swap_horiz_rounded, color: _C.amber),
-          tooltip: 'Switch Company',
-          onPressed: () => Navigator.pushNamed(context, '/switch-account'),
-        ),
-        IconButton(
-          icon: const Icon(Icons.person_rounded, color: _C.blue),
-          tooltip: 'Profile',
-          onPressed: () => Navigator.pushNamed(context, '/profile'),
-        ),
-        IconButton(
-          icon: const Icon(Icons.refresh_rounded, color: _C.blue),
-          tooltip: 'Refresh',
-          onPressed: _fetchRoutes,
-        ),
+        if (accounts.length > 1) ...[
+          const SizedBox(width: 4),
+          const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: _C.textSecondary),
+        ],
       ],
+    );
+
+    if (accounts.length <= 1) {
+      return greetingText;
+    }
+
+    return PopupMenuButton<Map<String, dynamic>>(
+      padding: EdgeInsets.zero,
+      tooltip: 'Switch Company',
+      offset: const Offset(0, 30),
+      child: greetingText,
+      onSelected: (account) async {
+        final currentKey = '${auth.vendorId ?? ''}:${auth.tenantId ?? ''}';
+        final newKey = '${account['vendor_id'] ?? account['vendor']?['id'] ?? ''}:${account['tenant_id'] ?? account['tenant']?['id'] ?? ''}';
+        if (currentKey == newKey) return;
+        
+        showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator(color: _C.blue)));
+        final result = await auth.switchCompany(account);
+        if (mounted) Navigator.pop(context);
+
+        if (result['success'] == true) {
+           _fetchRoutes();
+        } else {
+           if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['error'] ?? 'Failed to switch')));
+           }
+        }
+      },
+      itemBuilder: (BuildContext context) {
+        return accounts.map((account) {
+          final vendorName = account['vendor_name'] ?? account['vendor']?['name'] ?? 'Unknown';
+          final tenantName = account['tenant_name'] ?? account['tenant']?['name'] ?? 'Unknown';
+          final vendorId = account['vendor_id']?.toString() ?? account['vendor']?['id']?.toString();
+          final tenantId = account['tenant_id']?.toString() ?? account['tenant']?['id']?.toString();
+          final key = '${vendorId ?? ''}:${tenantId ?? ''}';
+          final currentKey = '${auth.vendorId ?? ''}:${auth.tenantId ?? ''}';
+          
+          return PopupMenuItem<Map<String, dynamic>>(
+            value: account,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(vendorName, style: GoogleFonts.poppins(fontSize: 13, fontWeight: key == currentKey ? FontWeight.bold : FontWeight.w500)),
+                      Text(tenantName, style: GoogleFonts.poppins(fontSize: 10, color: _C.textSecondary)),
+                    ],
+                  ),
+                ),
+                if (key == currentKey)
+                  const Icon(Icons.check_circle_rounded, color: _C.green, size: 16),
+              ],
+            ),
+          );
+        }).toList();
+      },
     );
   }
 
@@ -356,7 +391,7 @@ class _RidesScreenState extends State<RidesScreen> {
     final routeId   = route['route_id'];
     final logType   = route['log_type'] ?? 'IN';
     final shiftTime = route['shift_time'] ?? 'N/A';
-    final bool hasEscort     = route['has_escort'] == true || route['escort_required'] == true;
+    final bool hasEscort     = route['assigned_escort_id'] != null || route['has_escort'] == true || route['escort_required'] == true;
     final bool escortBoarded = route['escort_boarded'] == true || route['escort_status'] == 'Boarded';
     final bool showEscortBoard = isOngoing && hasEscort && !escortBoarded;
 
@@ -369,7 +404,7 @@ class _RidesScreenState extends State<RidesScreen> {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: _C.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 16, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 16, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -471,7 +506,15 @@ class _RidesScreenState extends State<RidesScreen> {
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
               child: Row(
                 children: [
-                  _buildSummaryStatPill(Icons.people_alt_rounded, '${stops.length}', 'Passengers', _C.blue),
+                  Builder(
+                    builder: (context) {
+                      final currentIdx = stops.indexWhere(
+                        (s) => s['status'] != 'Completed' && s['status'] != 'NoShow' && s['status'] != 'No Show' && s['status'] != 'No-Show',
+                      );
+                      final displayIdx = currentIdx == -1 ? stops.length : currentIdx + 1;
+                      return _buildSummaryStatPill(Icons.place_rounded, '$displayIdx/${stops.length}', 'Stops', _C.purple);
+                    },
+                  ),
                   const SizedBox(width: 10),
                   _buildSummaryStatPill(Icons.route_rounded,
                       '${(route['summary']?['total_distance_km'] ?? 0).toStringAsFixed(1)} km', 'Distance', _C.green),
@@ -482,14 +525,84 @@ class _RidesScreenState extends State<RidesScreen> {
               ),
             ),
 
-            // ── Passenger Stops ───────────────────────────────────────────────
-            if (stops.isNotEmpty)
+            // ── Escort Info ───────────────────────────────────────────────
+            Builder(
+              builder: (context) {
+                final escortName = route['escort_name']?.toString() ?? route['assigned_escort']?['name']?.toString() ?? route['assigned_escort']?['employee_name']?.toString();
+                final escortPhone = route['escort_phone']?.toString() ?? route['assigned_escort']?['phone']?.toString() ?? route['assigned_escort']?['phone_number']?.toString();
+                
+                if (hasEscort) {
+                  final displayName = (escortName != null && escortName.isNotEmpty) ? escortName : 'Security Escort';
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: showEscortBoard
+                          ? _C.amber.withValues(alpha: 0.07)
+                          : _C.tealBg.withValues(alpha: 0.2),
+                      border: Border(bottom: BorderSide(color: _C.border)),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: showEscortBoard ? _C.amberBg : _C.tealBg,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.security_rounded,
+                            color: showEscortBoard ? _C.amber : _C.teal,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                displayName,
+                                style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 14, color: _C.textPrimary),
+                              ),
+                              Text(
+                                showEscortBoard ? 'Board escort before starting stops' : 'Escort Boarded ✓',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 11.5,
+                                  color: showEscortBoard ? _C.amber : _C.teal,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (escortPhone != null && escortPhone.isNotEmpty)
+                          _iconAction(
+                            icon: Icons.phone_rounded,
+                            color: _C.green,
+                            bg: _C.greenBg,
+                            onTap: () async {
+                              final url = Uri.parse('tel:$escortPhone');
+                              if (await canLaunchUrl(url)) await launchUrl(url);
+                            },
+                          ),
+                      ],
+                    ),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+            ),
+
+            // ── Escort Gate: block stops until escort is boarded ──────────
+            if (showEscortBoard)
+              _buildEscortGate(route, provider)
+            // ── Passenger Stops (shown only after escort is boarded) ──────
+            else if (stops.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Section: Current Stop (first non-completed stop)
                     () {
                       final currentIdx = stops.indexWhere(
                         (s) => s['status'] != 'Completed' && s['status'] != 'NoShow' && s['status'] != 'No Show' && s['status'] != 'No-Show',
@@ -552,32 +665,26 @@ class _RidesScreenState extends State<RidesScreen> {
                 ),
               ),
 
-            // ── Route Progress Mini-Timeline ──────────────────────────────────
-            if (stops.isNotEmpty && isOngoing)
-              _buildRouteProgressTimeline(stops),
-
             // ── Footer Actions ────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (isAssigned)
+                  if (isAssigned && !showEscortBoard)
                     _buildPrimaryButton(
                       label: 'START DUTY',
                       icon: Icons.rocket_launch_rounded,
                       color: _C.blue,
                       onPressed: () => _handleStartDuty(routeId.toString(), provider),
                     ),
-                  if (showEscortBoard) ...[
-                    const SizedBox(height: 8),
+                  if (showEscortBoard)
                     _buildPrimaryButton(
                       label: 'BOARD ESCORT',
                       icon: Icons.security_rounded,
                       color: _C.teal,
                       onPressed: () => _handleEscortBoard(routeId.toString(), provider),
                     ),
-                  ],
                   if (isOngoing) ...[
                     const SizedBox(height: 8),
                     _buildEndDutyButton(() => _handleEndDuty(routeId.toString(), provider)),
@@ -587,6 +694,127 @@ class _RidesScreenState extends State<RidesScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  // ─── Escort Gate Card ────────────────────────────────────────────────────────
+  // Shown instead of all passenger stops when escort hasn't been boarded yet.
+
+  Widget _buildEscortGate(dynamic route, BookingProvider provider) {
+    final escortName  = route['escort_name']?.toString()
+        ?? route['assigned_escort']?['name']?.toString()
+        ?? route['assigned_escort']?['employee_name']?.toString()
+        ?? 'Security Escort';
+    final escortPhone = route['escort_phone']?.toString()
+        ?? route['assigned_escort']?['phone']?.toString()
+        ?? route['assigned_escort']?['phone_number']?.toString();
+    final stopCount   = (route['stops'] as List? ?? []).length;
+    final routeId     = route['route_id']?.toString() ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [_C.teal.withValues(alpha: 0.08), _C.tealBg.withValues(alpha: 0.5)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _C.teal.withValues(alpha: 0.35), width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Header ────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: const BoxDecoration(color: _C.tealBg, shape: BoxShape.circle),
+                    child: const Icon(Icons.security_rounded, color: _C.teal, size: 26),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          escortName,
+                          style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.bold, fontSize: 15, color: _C.textPrimary),
+                        ),
+                        Text(
+                          'Escort must board before any passenger stop',
+                          style: GoogleFonts.poppins(
+                              fontSize: 11.5, color: _C.teal, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (escortPhone != null && escortPhone.isNotEmpty)
+                    _iconAction(
+                      icon: Icons.phone_rounded,
+                      color: _C.green,
+                      bg: _C.greenBg,
+                      onTap: () async {
+                        final url = Uri.parse('tel:$escortPhone');
+                        if (await canLaunchUrl(url)) await launchUrl(url);
+                      },
+                    ),
+                ],
+              ),
+            ),
+
+            // ── Divider + locked stops indicator ──────────────────────────
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _C.teal.withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.lock_rounded, size: 16, color: _C.teal.withValues(alpha: 0.7)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '$stopCount passenger stop${stopCount == 1 ? '' : 's'} will unlock after escort boards',
+                      style: GoogleFonts.poppins(
+                          fontSize: 12, color: _C.textSecondary, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Board Escort CTA ──────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: ElevatedButton.icon(
+                onPressed: () => _handleEscortBoard(routeId, provider),
+                icon: const Icon(Icons.security_rounded, size: 18, color: Colors.white),
+                label: Text(
+                  'BOARD ESCORT NOW',
+                  style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white, letterSpacing: 0.4),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _C.teal,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -624,77 +852,12 @@ class _RidesScreenState extends State<RidesScreen> {
             ],
           ),
         ),
-        if (rightAction != null) rightAction,
+        if (rightAction != null) SizedBox(child: rightAction),
       ],
     );
   }
 
-  /// Mini progress timeline shown between stops list and END DUTY.
-  Widget _buildRouteProgressTimeline(List stops) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Divider(color: _C.border, height: 24),
-          Text('Route Progress',
-              style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.bold, fontSize: 13, color: _C.textPrimary)),
-          const SizedBox(height: 10),
-          ...stops.asMap().entries.map((e) {
-            final i = e.key;
-            final stop = e.value;
-            final s = stop['status'] ?? 'Scheduled';
-            final bool done = s == 'Completed' || s == 'NoShow' || s == 'No Show' || s == 'No-Show';
-            final bool active = !done && stops.indexWhere((x) {
-              final xs = x['status'] ?? 'Scheduled';
-              return xs != 'Completed' && xs != 'NoShow' && xs != 'No Show' && xs != 'No-Show';
-            }) == i;
-            final Color dotColor = done ? _C.green : (active ? _C.blue : _C.border);
-            final Color textColor = active ? _C.textPrimary : (done ? _C.textSecondary : _C.textSecondary);
-            final name = stop['employee_name'] ?? 'Stop ${i + 1}';
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: [
-                  Column(
-                    children: [
-                      Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: active ? _C.blue : (done ? _C.green : Colors.white),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: dotColor, width: 2),
-                        ),
-                      ),
-                      if (i < stops.length - 1)
-                        Container(width: 2, height: 18, color: _C.border),
-                    ],
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    name,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12.5,
-                      fontWeight: active ? FontWeight.bold : FontWeight.w500,
-                      color: textColor,
-                    ),
-                  ),
-                  if (done) ...[
-                    const SizedBox(width: 6),
-                    Icon(s == 'Completed' ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                        size: 13, color: s == 'Completed' ? _C.green : _C.red),
-                  ],
-                ],
-              ),
-            );
-          }),
-          Divider(color: _C.border, height: 16),
-        ],
-      ),
-    );
-  }
+
 
   Widget _buildEndDutyButton(VoidCallback onPressed) {
     return Container(
@@ -862,7 +1025,7 @@ class _RidesScreenState extends State<RidesScreen> {
                                 ],
                               ),
                             ),
-                            if (isOtpRequired) ...[
+                            if (isOtpRequired && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
                               const SizedBox(width: 8),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1121,7 +1284,18 @@ class _RidesScreenState extends State<RidesScreen> {
               ],
             ),
           ),
-          const Icon(Icons.chevron_right_rounded, color: _C.textSecondary, size: 20),
+          Tooltip(
+            message: 'Complete current stop first',
+            triggerMode: TooltipTriggerMode.tap,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: const BoxDecoration(
+                color: _C.bg,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.lock_rounded, color: _C.textSecondary, size: 16),
+            ),
+          ),
           const SizedBox(width: 4),
         ],
       ),
@@ -1183,6 +1357,11 @@ class _RidesScreenState extends State<RidesScreen> {
     final double? lat    = isOnBoard ? stop['drop_latitude']  : stop['pickup_latitude'];
     final double? lng    = isOnBoard ? stop['drop_longitude'] : stop['pickup_longitude'];
     final String eta     = stop['estimated_pick_up_time'] ?? '';
+    
+    final bool hasEscort     = route['assigned_escort_id'] != null || route['has_escort'] == true || route['escort_required'] == true;
+    final bool escortBoarded = route['escort_boarded'] == true || route['escort_status'] == 'Boarded';
+    final bool isEscortPending = hasEscort && !escortBoarded;
+
     final bool showPickup = route['status'] == 'Ongoing' && status == 'Scheduled';
     final bool showDrop   = route['status'] == 'Ongoing' && status == 'Ongoing';
     final bool isOtpRequired = isOnBoard
@@ -1255,7 +1434,7 @@ class _RidesScreenState extends State<RidesScreen> {
                     ],
                   ),
                 ),
-                if (isOtpRequired) ...[
+                if (isOtpRequired && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
                   const SizedBox(width: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -1318,30 +1497,32 @@ class _RidesScreenState extends State<RidesScreen> {
                 children: [
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () => _handlePickup(stop, route, provider),
+                      onPressed: isEscortPending ? () {
+                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please board the escort first!')));
+                      } : () => _handlePickup(stop, route, provider),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _C.green,
+                        backgroundColor: isEscortPending ? _C.border : _C.green,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
                         padding: const EdgeInsets.symmetric(vertical: 9),
                         elevation: 0,
                       ),
-                      child: Text('BOARD PASSENGER',
-                          style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+                      child: Text(isEscortPending ? 'BOARD ESCORT FIRST' : 'BOARD PASSENGER',
+                          style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: isEscortPending ? _C.textSecondary : Colors.white)),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => _handleNoShow(stop, route, provider),
+                      onPressed: isEscortPending ? null : () => _handleNoShow(stop, route, provider),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: _C.red,
-                        side: BorderSide(color: _C.red.withValues(alpha: 0.4)),
-                        backgroundColor: _C.redBg,
+                        side: BorderSide(color: isEscortPending ? _C.border : _C.red.withValues(alpha: 0.4)),
+                        backgroundColor: isEscortPending ? _C.bg : _C.redBg,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
                         padding: const EdgeInsets.symmetric(vertical: 9),
                       ),
                       child: Text('NO SHOW',
-                          style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: _C.red)),
+                          style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: isEscortPending ? _C.border : _C.red)),
                     ),
                   ),
                 ],
@@ -1460,24 +1641,7 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  Widget _buildStatItem(IconData icon, String value, String label, Color color) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: color, size: 22),
-        const SizedBox(height: 4),
-        Text(value,
-            style: GoogleFonts.poppins(
-                fontWeight: FontWeight.bold, fontSize: 14, color: _C.textPrimary)),
-        Text(label,
-            style: GoogleFonts.poppins(fontSize: 10.5, color: _C.textSecondary, fontWeight: FontWeight.w500)),
-      ],
-    );
-  }
 
-  Widget _buildDivider() {
-    return Container(height: 36, width: 1, color: _C.border);
-  }
 
   Widget _buildPrimaryButton({required String label, required IconData icon, required Color color, required VoidCallback onPressed}) {
     return ElevatedButton.icon(
@@ -1524,11 +1688,11 @@ class _RidesScreenState extends State<RidesScreen> {
               Navigator.push(
                 context,
                 PageRouteBuilder(
-                  pageBuilder: (_, __, ___) => ChatScreen(
+                  pageBuilder: (_, _, _) => ChatScreen(
                     bookingId: id,
                     passengerName: stop['employee_name']?.toString(),
                   ),
-                  transitionsBuilder: (_, animation, __, child) =>
+                  transitionsBuilder: (_, animation, _, child) =>
                       FadeTransition(opacity: animation, child: child),
                   transitionDuration: const Duration(milliseconds: 300),
                 ),
@@ -1556,30 +1720,7 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  Widget _buildChatButton(dynamic stop) {
-    return _iconAction(
-      icon: Icons.chat_bubble_outline_rounded,
-      color: _C.blue,
-      bg: _C.blueBg,
-      onTap: () {
-        final bookingId = stop['booking_id'];
-        final int? id = bookingId is int ? bookingId : int.tryParse(bookingId.toString());
-        if (id == null) return;
-        Navigator.push(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => ChatScreen(
-              bookingId: id,
-              passengerName: stop['employee_name']?.toString(),
-            ),
-            transitionsBuilder: (_, animation, __, child) =>
-                FadeTransition(opacity: animation, child: child),
-            transitionDuration: const Duration(milliseconds: 300),
-          ),
-        );
-      },
-    );
-  }
+
 
   // ─── Speed HUD (overlaps footer, Google Maps style) ─────────────────────────
 
@@ -1589,9 +1730,13 @@ class _RidesScreenState extends State<RidesScreen> {
     final exceeded = locationProvider.isSpeedLimitExceeded;
 
     Color hudColor;
-    if (exceeded)                  hudColor = _C.red;
-    else if (speed >= limit * 0.9) hudColor = _C.amber;
-    else                           hudColor = _C.teal;
+    if (exceeded) {
+      hudColor = _C.red;
+    } else if (speed >= limit * 0.9) {
+      hudColor = _C.amber;
+    } else {
+      hudColor = _C.teal;
+    }
 
     return Container(
       width: 76,
@@ -1684,7 +1829,22 @@ class _RidesScreenState extends State<RidesScreen> {
   }
 
   Future<void> _handleEndDuty(String routeId, BookingProvider provider) async {
-    final result = await provider.endDuty(routeId, null);
+    // Show a loading dialog to prevent full screen loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(
+        child: CircularProgressIndicator(color: Color(0xFF3B82F6), strokeWidth: 2.5),
+      ),
+    );
+
+    final result = await provider.endDuty(routeId, null, showLoading: false);
+    
+    // Pop the loading dialog
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+
     if (result['success'] == true) {
       if (mounted) {
         Provider.of<LocationProvider>(context, listen: false).setActiveRoute(null);
@@ -1860,9 +2020,9 @@ class _RidesScreenState extends State<RidesScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.06),
+        color: color.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.12)),
+        border: Border.all(color: color.withValues(alpha: 0.12)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1914,6 +2074,7 @@ class _RidesScreenState extends State<RidesScreen> {
       otp = await _showOtpDialog(context, stop['employee_name']);
       if (otp == null) return;
     }
+    if (!mounted) return;
     final locationProvider = Provider.of<LocationProvider>(context, listen: false);
     final pos = await locationProvider.getCurrentLocation();
     if (pos == null) {
@@ -1923,11 +2084,7 @@ class _RidesScreenState extends State<RidesScreen> {
     final result = await provider.startTrip(
         route['route_id'].toString(), stop['booking_id'].toString(), otp, pos.latitude, pos.longitude);
     if (result['success'] != true && mounted) {
-      if (result['errorCode'] == 'INVALID_BOARDING_OTP') {
-        _showInvalidOtpDialog();
-      } else {
-        _showErrorDialog(result['error'] ?? 'Failed to start trip');
-      }
+      _handleStopEventError(result, provider);
     }
   }
 
@@ -1937,6 +2094,7 @@ class _RidesScreenState extends State<RidesScreen> {
       otp = await _showOtpDialog(context, stop['employee_name']);
       if (otp == null) return;
     }
+    if (!mounted) return;
     final locationProvider = Provider.of<LocationProvider>(context, listen: false);
     final pos = await locationProvider.getCurrentLocation();
     if (pos == null) {
@@ -1946,11 +2104,57 @@ class _RidesScreenState extends State<RidesScreen> {
     final result = await provider.dropTrip(
         route['route_id'].toString(), stop['booking_id'].toString(), otp, pos.latitude, pos.longitude);
     if (result['success'] != true && mounted) {
-      if (result['errorCode'] == 'INVALID_DEBOARDING_OTP') {
+      _handleStopEventError(result, provider);
+    }
+  }
+
+  /// Shared error handler for pickup and drop failures.
+  /// Uses [errorCode] to decide the UX action; always displays the backend's
+  /// own [message] string — nothing is hardcoded here.
+  void _handleStopEventError(Map<String, dynamic> result, BookingProvider provider) {
+    final String message  = result['error']?.toString() ?? 'Something went wrong. Please try again.';
+    final String errorCode = result['errorCode']?.toString() ?? '';
+
+    switch (errorCode) {
+      case 'STOP_EVENT_CONFLICT':
+        // Non-blocking amber snackbar — already recorded; silently sync state.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              message,
+              style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
+            ),
+            backgroundColor: _C.amber,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        // Silently refresh so the UI reflects the already-recorded state.
+        provider.fetchTrips(status: 'ongoing', showLoading: false);
+        break;
+
+      case 'ROUTE_NOT_FOUND':
+      case 'BOOKING_NOT_IN_ROUTE':
+        // Error dialog + silent background refresh.
+        _showErrorDialog(message);
+        provider.fetchTrips(status: 'ongoing', showLoading: false);
+        break;
+
+      case 'INVALID_BOARDING_OTP':
+      case 'INVALID_DEBOARDING_OTP':
+        // Dedicated OTP dialog — backend message is surfaced via the generic
+        // error flow if the user taps retry; this dialog just signals OTP failure.
         _showInvalidOtpDialog();
-      } else {
-        _showErrorDialog(result['error'] ?? 'Failed to drop trip');
-      }
+        break;
+
+      // All other error codes (PICKUP_REQUIRED, ROUTE_NOT_ONGOING,
+      // ESCORT_NOT_BOARDED, PREVIOUS_BOOKINGS_PENDING, DARK_HOUR_NO_ESCORT,
+      // DRIVER_TOO_FAR_FROM_PICKUP, DRIVER_TOO_FAR_FROM_DROP, etc.) — pass
+      // the backend message straight to the shared error dialog.
+      default:
+        _showErrorDialog(message);
     }
   }
 
@@ -2002,10 +2206,10 @@ class _RidesScreenState extends State<RidesScreen> {
                         margin: const EdgeInsets.only(bottom: 6),
                         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
                         decoration: BoxDecoration(
-                          color: isSelected ? _C.red.withOpacity(0.05) : Colors.transparent,
+                          color: isSelected ? _C.red.withValues(alpha: 0.05) : Colors.transparent,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: isSelected ? _C.red.withOpacity(0.3) : _C.border,
+                            color: isSelected ? _C.red.withValues(alpha: 0.3) : _C.border,
                           ),
                         ),
                         child: Row(
@@ -2264,7 +2468,7 @@ class _RidesScreenState extends State<RidesScreen> {
         _showErrorDialog('Could not open maps application');
       }
     } catch (e) {
-      print('Error launching maps: $e');
+      debugPrint('Error launching maps: $e');
       if (mounted) _showErrorDialog('Error launching maps: $e');
     }
   }

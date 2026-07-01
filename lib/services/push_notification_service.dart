@@ -108,7 +108,7 @@ class PushNotificationService {
       //    in the background but not terminated.
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         _logger.i('App foregrounded via notification tap: ${message.data}');
-        _navigateToChatFromData(message.data);
+        _handleNotificationTapData(message.data);
       });
 
       // 5. Token-refresh listener.
@@ -182,7 +182,7 @@ class PushNotificationService {
       _logger.i('App cold-launched via notification: ${initial.data}');
       // Small delay to let the navigator settle after startup.
       await Future.delayed(const Duration(milliseconds: 500));
-      _navigateToChatFromData(initial.data);
+      _handleNotificationTapData(initial.data);
     }
   }
 
@@ -217,14 +217,18 @@ class PushNotificationService {
     // Encode routing fields so _onNotificationTap can navigate to the correct
     // chat screen and attach the RTDB listener without a REST round-trip.
     final payloadMap = <String, dynamic>{};
+    final type = message.data['type'];
     final bookingId    = message.data['booking_id'];
     final passengerName = message.data['passenger_name'];
-    final firebasePath = message.data['firebase_path']; // added in latest FCM payload
-    final tenantId     = message.data['tenant_id'];     // added in latest FCM payload
+    final firebasePath = message.data['firebase_path'];
+    final tenantId     = message.data['tenant_id'];
+    
+    if (type != null) payloadMap['type'] = type;
     if (bookingId    != null) payloadMap['booking_id']    = bookingId;
     if (passengerName != null) payloadMap['passenger_name'] = passengerName;
     if (firebasePath != null) payloadMap['firebase_path']  = firebasePath;
     if (tenantId     != null) payloadMap['tenant_id']      = tenantId;
+    
     final payload = payloadMap.isNotEmpty ? jsonEncode(payloadMap) : null;
 
     if (notification != null && android != null && Platform.isAndroid) {
@@ -269,11 +273,25 @@ class PushNotificationService {
     if (response.payload != null && response.payload!.isNotEmpty) {
       try {
         final data = jsonDecode(response.payload!) as Map<String, dynamic>;
-        _navigateToChatFromData(data);
+        _handleNotificationTapData(data);
       } catch (e) {
         _logger.e('Failed to parse notification payload: $e');
       }
     }
+  }
+
+  /// Routes the notification tap based on the payload data.
+  void _handleNotificationTapData(Map<String, dynamic> data) {
+    final type = data['type'] as String?;
+    
+    if (type == 'new_duty') {
+      _logger.i('Navigating to /schedules for new duty notification');
+      NavigationService.navigatorKey.currentState?.pushNamed('/schedules');
+      return;
+    }
+    
+    // Fallback to chat handling if it's a chat message
+    _navigateToChatFromData(data);
   }
 
   /// Pushes the `/chat` route using the global navigator key.

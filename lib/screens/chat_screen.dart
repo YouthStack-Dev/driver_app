@@ -202,7 +202,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   return Container(
                     margin: const EdgeInsets.only(bottom: 6),
                     decoration: BoxDecoration(
-                      color: isSelected ? _primaryColor.withOpacity(0.06) : Colors.transparent,
+                      color: isSelected ? _primaryColor.withValues(alpha: 0.06) : Colors.transparent,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: ListTile(
@@ -287,11 +287,11 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.all(1.5),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: _primaryColor.withOpacity(0.2), width: 1.5),
+              border: Border.all(color: _primaryColor.withValues(alpha: 0.2), width: 1.5),
             ),
             child: CircleAvatar(
               radius: 17,
-              backgroundColor: _primaryColor.withOpacity(0.1),
+              backgroundColor: _primaryColor.withValues(alpha: 0.1),
               child: const Icon(Icons.person_outline_rounded, color: _primaryColor, size: 18),
             ),
           ),
@@ -310,7 +310,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 Consumer<ChatProvider>(
-                  builder: (_, p, __) {
+                  builder: (_, p, _) {
                     final langName = p.supportedLanguages[p.driverLanguage];
                     if (langName == null) return const SizedBox.shrink();
                     return Row(
@@ -332,7 +332,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       actions: [
         Consumer<ChatProvider>(
-          builder: (_, p, __) => IconButton(
+          builder: (_, p, _) => IconButton(
             icon: const Icon(Icons.translate_rounded),
             onPressed: p.supportedLanguages.isNotEmpty ? _showLanguagePicker : null,
           ),
@@ -398,7 +398,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: const Color(0xFF6C63FF).withOpacity(0.06),
+                color: const Color(0xFF6C63FF).withValues(alpha: 0.06),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.chat_bubble_outline_rounded, size: 48, color: _primaryColor),
@@ -542,12 +542,12 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
         ],
-        border: isDriver ? null : Border.all(color: Colors.grey.withOpacity(0.08), width: 1),
+        border: isDriver ? null : Border.all(color: Colors.grey.withValues(alpha: 0.08), width: 1),
       ),
       child: Column(
         crossAxisAlignment: isDriver ? CrossAxisAlignment.end : CrossAxisAlignment.start,
@@ -569,14 +569,14 @@ class _ChatScreenState extends State<ChatScreen> {
                 Icon(
                   Icons.g_translate_rounded, 
                   size: 11, 
-                  color: isDriver ? Colors.white.withOpacity(0.5) : Colors.grey.shade400
+                  color: isDriver ? Colors.white.withValues(alpha: 0.5) : Colors.grey.shade400
                 ),
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(
                     originalText,
                     style: GoogleFonts.poppins(
-                      color: isDriver ? Colors.white.withOpacity(0.6) : Colors.grey.shade400,
+                      color: isDriver ? Colors.white.withValues(alpha: 0.6) : Colors.grey.shade400,
                       fontSize: 11,
                       fontStyle: FontStyle.italic,
                       height: 1.3,
@@ -629,7 +629,7 @@ class _ChatScreenState extends State<ChatScreen> {
         border: Border(top: BorderSide(color: Colors.grey.shade100)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
             offset: const Offset(0, -3),
           ),
@@ -666,7 +666,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide(color: _primaryColor.withOpacity(0.3), width: 1),
+                      borderSide: BorderSide(color: _primaryColor.withValues(alpha: 0.3), width: 1),
                     ),
                   ),
                 ),

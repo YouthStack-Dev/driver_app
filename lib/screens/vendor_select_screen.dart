@@ -49,7 +49,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
-              backgroundColor: const Color(0xFF122131),
+              backgroundColor: const Color(0xFFFFFFFF),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               title: Row(
                 children: [
@@ -57,13 +57,13 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                   const SizedBox(width: 10),
                   Text(
                     'Device Not Activated', 
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 17, color: const Color(0xFFD4E4FA)),
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 17, color: const Color(0xFF111827)),
                   ),
                 ],
               ),
               content: Text(
                 'Your device is not activated for this company. Please contact your fleet administrator to activate this device.',
-                style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFFC2C6D7), height: 1.4),
+                style: GoogleFonts.poppins(fontSize: 13.5, color: const Color(0xFF6B7280), height: 1.4),
               ),
               actions: [
                 TextButton(
@@ -95,7 +95,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
     final vendors = Provider.of<AuthProvider>(context).vendors;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF051424),
+      backgroundColor: const Color(0xFFF4F6FA),
       body: Stack(
         children: [
           // Background glowing gradients
@@ -107,7 +107,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
               height: 320,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF2E7CFF).withOpacity(0.05),
+                color: const Color(0xFF2E7CFF).withValues(alpha: 0.05),
               ),
             ),
           ),
@@ -119,7 +119,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
               height: 240,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF2E7CFF).withOpacity(0.03),
+                color: const Color(0xFF2E7CFF).withValues(alpha: 0.03),
               ),
             ),
           ),
@@ -132,7 +132,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                 Padding(
                   padding: const EdgeInsets.only(left: 12, top: 12),
                   child: IconButton(
-                    icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFFD4E4FA), size: 24),
+                    icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF111827), size: 24),
                     onPressed: () {
                       if (Navigator.canPop(context)) {
                         Navigator.pop(context);
@@ -152,9 +152,9 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF2E7CFF).withOpacity(0.12),
+                          color: const Color(0xFF2E7CFF).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xFF2E7CFF).withOpacity(0.2), width: 1),
+                          border: Border.all(color: const Color(0xFF2E7CFF).withValues(alpha: 0.2), width: 1),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -166,7 +166,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                               style: GoogleFonts.poppins(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
-                                color: const Color(0xFFD4E4FA),
+                                color: const Color(0xFF111827),
                               ),
                             ),
                           ],
@@ -178,7 +178,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                         style: GoogleFonts.poppins(
                           fontSize: 26,
                           fontWeight: FontWeight.bold,
-                          color: const Color(0xFFD4E4FA),
+                          color: const Color(0xFF111827),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -186,7 +186,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                         'Choose the active corporate fleet you are driving for today.',
                         style: GoogleFonts.poppins(
                           fontSize: 13.5,
-                          color: const Color(0xFFC2C6D7),
+                          color: const Color(0xFF6B7280),
                           height: 1.4,
                         ),
                       ),
@@ -248,15 +248,15 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
         duration: const Duration(milliseconds: 200),
         margin: const EdgeInsets.only(bottom: 16),
         decoration: BoxDecoration(
-          color: const Color(0xFF122131),
+          color: const Color(0xFFFFFFFF),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: isActive ? const Color(0xFF2E7CFF).withOpacity(0.15) : const Color(0xFF334155),
+            color: isActive ? const Color(0xFF2E7CFF).withValues(alpha: 0.15) : const Color(0xFFE8ECF4),
             width: isActive ? 1.5 : 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.12),
+              color: Colors.black.withValues(alpha: 0.12),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -268,7 +268,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
             decoration: BoxDecoration(
               border: Border(
                 left: BorderSide(
-                  color: isActive ? const Color(0xFF2E7CFF) : const Color(0xFF334155),
+                  color: isActive ? const Color(0xFF2E7CFF) : const Color(0xFFE8ECF4),
                   width: 5,
                 ),
               ),
@@ -282,8 +282,8 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                   height: 48,
                   decoration: BoxDecoration(
                     color: isActive 
-                        ? const Color(0xFF2E7CFF).withOpacity(0.1) 
-                        : const Color(0xFF1E293B),
+                        ? const Color(0xFF2E7CFF).withValues(alpha: 0.1) 
+                        : const Color(0xFFE8ECF4),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -304,7 +304,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                         style: GoogleFonts.poppins(
                           fontSize: 15.5,
                           fontWeight: FontWeight.bold,
-                          color: isActive ? const Color(0xFFD4E4FA) : const Color(0xFF64748B),
+                          color: isActive ? const Color(0xFF111827) : const Color(0xFF64748B),
                         ),
                       ),
                       const SizedBox(height: 3),
@@ -312,7 +312,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                         tenantName,
                         style: GoogleFonts.poppins(
                           fontSize: 12.5,
-                          color: const Color(0xFFC2C6D7),
+                          color: const Color(0xFF6B7280),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -354,7 +354,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
                     Icon(
                       Icons.arrow_forward_ios_rounded,
                       size: 13,
-                      color: isActive ? const Color(0xFF2E7CFF) : const Color(0xFF334155),
+                      color: isActive ? const Color(0xFF2E7CFF) : const Color(0xFFE8ECF4),
                     ),
                   ],
                 ),
@@ -376,9 +376,9 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFB4AB).withOpacity(0.08),
+                color: const Color(0xFFFFB4AB).withValues(alpha: 0.08),
                 shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFFFFB4AB).withOpacity(0.15)),
+                border: Border.all(color: const Color(0xFFFFB4AB).withValues(alpha: 0.15)),
               ),
               child: const Icon(
                 Icons.business_outlined,
@@ -392,7 +392,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
               style: GoogleFonts.poppins(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: const Color(0xFFD4E4FA),
+                color: const Color(0xFF111827),
               ),
             ),
             const SizedBox(height: 8),
@@ -401,7 +401,7 @@ class _VendorSelectScreenState extends State<VendorSelectScreen> {
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(
                 fontSize: 13.5,
-                color: const Color(0xFFC2C6D7),
+                color: const Color(0xFF6B7280),
                 height: 1.4,
               ),
             ),

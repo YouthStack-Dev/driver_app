@@ -5,8 +5,9 @@ import 'providers/location_provider.dart';
 import 'providers/booking_provider.dart';
 import 'providers/chat_provider.dart';
 import 'services/firebase_service.dart';
+import 'services/permission_service.dart';
 import 'screens/login_screen.dart';
-
+import 'screens/home_screen.dart';
 import 'screens/rides_screen.dart';
 import 'screens/schedules_screen.dart';
 import 'screens/profile_screen.dart';
@@ -22,11 +23,12 @@ import 'package:page_transition/page_transition.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Register the background FCM handler BEFORE Firebase is initialised.
-  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-
   // Initialize Firebase (mock or real if configured)
+  // MUST be called before registering background messaging handler.
   await FirebaseService().initialize();
+  
+  // Register the background FCM handler AFTER Firebase is initialised.
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   
   // Initialize Push Notifications (FCM + Local Notifications + tap handlers)
   await PushNotificationService().initialize();
@@ -45,7 +47,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()..init()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => LocationProvider()),
         ChangeNotifierProvider(create: (_) => BookingProvider()),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
@@ -83,7 +85,7 @@ class MyApp extends StatelessWidget {
               page = const LoginScreen();
               break;
             case '/home':
-              page = const RidesScreen();
+              page = const HomeScreen();
               break;
             case '/schedules':
               page = const SchedulesScreen();
@@ -125,17 +127,59 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class AuthWrapper extends StatelessWidget {
+class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
 
   @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  bool _isInit = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeApp();
+  }
+
+  Future<void> _initializeApp() async {
+    // 1. Request permissions first
+    await PermissionService().checkAndRequestAllPermissions(context);
+    
+    if (!mounted) return;
+    
+    // 2. Initialize authentication
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    await auth.init();
+    
+    if (mounted) {
+      setState(() {
+        _isInit = true;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (!_isInit) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF4F6FA),
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Color(0xFF2E7CFF),
+            strokeWidth: 3,
+          ),
+        ),
+      );
+    }
+
     return Consumer<AuthProvider>(
       builder: (context, auth, _) {
         switch (auth.status) {
           case AuthStatus.unknown:
             return const Scaffold(
-              backgroundColor: Color(0xFF051424),
+              backgroundColor: Color(0xFFF4F6FA),
               body: Center(
                 child: CircularProgressIndicator(
                   color: Color(0xFF2E7CFF),
@@ -144,7 +188,7 @@ class AuthWrapper extends StatelessWidget {
               ),
             );
           case AuthStatus.authenticated:
-            return const RidesScreen();
+            return const HomeScreen();
           case AuthStatus.tempAuthenticated:
             final licenseNumber = auth.currentUser?['driver']?['license_number'] ?? 
                                   auth.currentUser?['user']?['driver']?['license_number'] ?? 
