@@ -29,6 +29,7 @@ class SpeedViolationService {
   /// the 30-second cooldown window.
   Future<void> reportViolation({
     required String routeId,
+    int? vehicleId,
     required double speedKmph,
     required double speedLimitKmph,
     required double latitude,
@@ -46,14 +47,20 @@ class SpeedViolationService {
     _lastReportedAt = now;
 
     try {
-      final payload = {
-        'route_id': routeId,
-        'speed_kmph': speedKmph,
-        'speed_limit_kmph': speedLimitKmph,
-        'latitude': latitude,
-        'longitude': longitude,
+      final payload = <String, dynamic>{
+        'speed_recorded': speedKmph,
         'recorded_at': now.toUtc().toIso8601String(),
       };
+
+      final parsedRouteId = int.tryParse(routeId);
+      if (parsedRouteId != null) {
+        payload['route_id'] = parsedRouteId;
+      }
+      if (vehicleId != null) {
+        payload['vehicle_id'] = vehicleId;
+      }
+      payload['latitude'] = latitude;
+      payload['longitude'] = longitude;
 
       final response = await _apiClient.client
           .post(ApiEndpoints.speedViolation, data: payload);
@@ -61,7 +68,7 @@ class SpeedViolationService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         _logger.i(
             'SpeedViolation reported: ${speedKmph.toStringAsFixed(1)} kmph '
-            '(limit: ${speedLimitKmph.toStringAsFixed(1)} kmph, route: $routeId)');
+            '(limit: ${speedLimitKmph.toStringAsFixed(1)} kmph, route: $routeId, vehicle: $vehicleId)');
       } else {
         _logger.w(
             'SpeedViolation: unexpected HTTP ${response.statusCode}');

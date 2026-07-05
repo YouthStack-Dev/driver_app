@@ -11,6 +11,7 @@ class SessionService {
   // SharedPreferences keys (read by Kotlin background service)
   static const String _bgTokenKey      = 'bg_access_token';
   static const String _bgRouteKey      = 'active_route_id';
+  static const String _bgVehicleKey    = 'active_vehicle_id';
   static const String _trackingEnabledKey = 'tracking_enabled';
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage(
@@ -223,6 +224,22 @@ class SessionService {
     await prefs.remove(_bgRouteKey);
   }
 
+  Future<void> saveActiveVehicle(int vehicleId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_bgVehicleKey, vehicleId);
+  }
+
+  Future<int?> getActiveVehicle() async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getInt(_bgVehicleKey);
+    return id == 0 ? null : id;
+  }
+
+  Future<void> clearActiveVehicle() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_bgVehicleKey);
+  }
+
   // ── Tracking flag (used by BootReceiver to decide if service should restart) ─
 
   Future<void> setTrackingEnabled(bool enabled) async {
@@ -250,6 +267,7 @@ class SessionService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_bgTokenKey);
     await prefs.remove(_bgRouteKey);
+    await prefs.remove(_bgVehicleKey);
     await prefs.remove(_trackingEnabledKey);
     await prefs.remove('driver_id');
     await prefs.remove('tenant_id');

@@ -63,7 +63,21 @@ class LocationService with WidgetsBindingObserver {
       // Clear route in SharedPreferences and stop background service
       _logger.i('Stopping background tracking service (route cleared)');
       SessionService().clearActiveRoute();
+      SessionService().clearActiveVehicle();
       BackgroundTrackingService().stopBackgroundTracking();
+    }
+  }
+
+  int? _activeVehicleId;
+  int? get activeVehicleId => _activeVehicleId;
+  set activeVehicleId(int? value) {
+    if (_activeVehicleId == value) return;
+    _activeVehicleId = value;
+    _logger.i('📍 Vehicle ID updated in memory: $value');
+    if (value != null) {
+      SessionService().saveActiveVehicle(value);
+    } else {
+      SessionService().clearActiveVehicle();
     }
   }
 

@@ -676,7 +676,11 @@ class _RidesScreenState extends State<RidesScreen> {
                       label: 'START DUTY',
                       icon: Icons.rocket_launch_rounded,
                       color: _C.blue,
-                      onPressed: () => _handleStartDuty(routeId.toString(), provider),
+                      onPressed: () {
+                        final vehicleIdRaw = route['vehicle_id'] ?? route['vehicle']?['id'] ?? route['vehicle']?['vehicle_id'];
+                        final vehicleId = vehicleIdRaw != null ? int.tryParse(vehicleIdRaw.toString()) : null;
+                        _handleStartDuty(routeId.toString(), provider, vehicleId: vehicleId);
+                      },
                     ),
                   if (showEscortBoard)
                     _buildPrimaryButton(
@@ -1802,10 +1806,29 @@ class _RidesScreenState extends State<RidesScreen> {
 
   // ─── Action Handlers ─────────────────────────────────────────────────────────
 
-  Future<void> _handleStartDuty(String routeId, BookingProvider provider) async {
+  Future<void> _handleStartDuty(String routeId, BookingProvider provider, {int? vehicleId}) async {
     final success = await provider.startDuty(routeId);
     if (success && mounted) {
-      Provider.of<LocationProvider>(context, listen: false).setActiveRoute(routeId);
+      int? finalVehicleId = vehicleId;
+      if (finalVehicleId == null) {
+        try {
+          final auth = Provider.of<AuthProvider>(context, listen: false);
+          final userData = auth.currentUser;
+          if (userData != null) {
+            final driver = userData['driver'] ?? userData['user']?['driver'];
+            final vIdRaw = userData['vehicle_id'] ?? 
+                           userData['vehicle']?['id'] ?? 
+                           driver?['vehicle_id'] ?? 
+                           driver?['vehicle']?['id'];
+            if (vIdRaw != null) {
+              finalVehicleId = int.tryParse(vIdRaw.toString());
+            }
+          }
+        } catch (e) {
+          debugPrint('Error resolving fallback vehicle ID: $e');
+        }
+      }
+      Provider.of<LocationProvider>(context, listen: false).setActiveRoute(routeId, vehicleId: finalVehicleId);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Duty Started!')));
     } else if (mounted) {
       _showErrorDialog(provider.error ?? 'Failed');

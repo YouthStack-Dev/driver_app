@@ -67,9 +67,11 @@ class LocationProvider extends ChangeNotifier {
   Future<void> _restoreActiveRoute() async {
     try {
       final activeRouteId = await SessionService().getActiveRoute();
+      final activeVehicleId = await SessionService().getActiveVehicle();
       if (activeRouteId != null && activeRouteId.isNotEmpty) {
-        debugPrint('🔄 LocationProvider: Restoring active route state: $activeRouteId');
+        debugPrint('🔄 LocationProvider: Restoring active route state: $activeRouteId, vehicle: $activeVehicleId');
         _locationService.activeRouteId = activeRouteId;
+        _locationService.activeVehicleId = activeVehicleId;
         notifyListeners();
       }
     } catch (e) {
@@ -88,6 +90,7 @@ class LocationProvider extends ChangeNotifier {
     if (_isSpeedLimitExceeded && _locationService.activeRouteId != null) {
       SpeedViolationService().reportViolation(
         routeId: _locationService.activeRouteId!,
+        vehicleId: _locationService.activeVehicleId,
         speedKmph: _currentSpeedKmh,
         speedLimitKmph: speedLimitKmh,
         latitude: position.latitude,
@@ -138,8 +141,9 @@ class LocationProvider extends ChangeNotifier {
   /// Tells LocationService which route is currently active so that speed
   /// violations are tagged with the correct route_id.
   /// Pass null when duty ends.
-  void setActiveRoute(String? routeId) {
+  void setActiveRoute(String? routeId, {int? vehicleId}) {
     _locationService.activeRouteId = routeId;
+    _locationService.activeVehicleId = vehicleId;
     notifyListeners();
   }
 
