@@ -122,10 +122,10 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                     (first['drop_location'] != null && first['pickup_location'] == null);
 
       final double? distKm = 
+          (first['actual_distance_km'] is num ? (first['actual_distance_km'] as num).toDouble() : null) ??
+          (first['estimated_distance_km'] is num ? (first['estimated_distance_km'] as num).toDouble() : null) ??
           (first['actual_total_distance'] is num ? (first['actual_total_distance'] as num).toDouble() : null) ??
-          (first['actual_total_distance_km'] is num ? (first['actual_total_distance_km'] as num).toDouble() : null) ??
-          (first['estimated_total_distance'] is num ? (first['estimated_total_distance'] as num).toDouble() : null) ??
-          (first['estimated_total_distance_km'] is num ? (first['estimated_total_distance_km'] as num).toDouble() : null);
+          (first['estimated_total_distance'] is num ? (first['estimated_total_distance'] as num).toDouble() : null);
 
       routeList.add({
         'route_id': rId,

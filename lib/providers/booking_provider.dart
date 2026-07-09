@@ -274,9 +274,9 @@ class BookingProvider extends ChangeNotifier {
               orElse: () => routes.first,
             );
             summaryData = {
-              'actual_total_distance': endedRoute['actual_total_distance'],
+              'actual_total_distance': endedRoute['actual_distance_km'] ?? endedRoute['actual_total_distance'],
               'actual_total_time': endedRoute['actual_total_time'],
-              'estimated_total_distance': endedRoute['estimated_total_distance'],
+              'estimated_total_distance': endedRoute['estimated_distance_km'] ?? endedRoute['estimated_total_distance'],
               'estimated_total_time': endedRoute['estimated_total_time'],
               'route_code': endedRoute['route_code'] ?? endedRoute['route_id']?.toString() ?? routeId,
               'stops_count': endedRoute['stops'] is List ? (endedRoute['stops'] as List).length : 0,

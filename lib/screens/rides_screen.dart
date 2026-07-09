@@ -517,7 +517,7 @@ class _RidesScreenState extends State<RidesScreen> {
                   ),
                   const SizedBox(width: 10),
                   _buildSummaryStatPill(Icons.route_rounded,
-                      '${(route['summary']?['total_distance_km'] ?? 0).toStringAsFixed(1)} km', 'Distance', _C.green),
+                      '${(route['actual_distance_km'] ?? route['estimated_distance_km'] ?? route['summary']?['total_distance_km'] ?? 0).toStringAsFixed(1)} km', 'Distance', _C.green),
                   const SizedBox(width: 10),
                   _buildSummaryStatPill(Icons.timer_rounded,
                       '${(route['summary']?['total_time_minutes'] ?? 0).round()} min', 'ETA', _C.amber),
