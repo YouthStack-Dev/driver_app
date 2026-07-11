@@ -44,7 +44,7 @@ class RouteService {
 
     } on DioException catch (e) {
       _logger.e('Failed to fetch trips', error: e);
-      return {'success': false, 'error': e.message};
+      return _handleError(e);
     } catch (e) {
       return {'success': false, 'error': e.toString()};
     }
