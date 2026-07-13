@@ -226,9 +226,21 @@ class AuthService {
       _logger.i('🔑 New Access Token generated: ${newAccessToken != null ? "...${newAccessToken.substring(newAccessToken.length > 10 ? newAccessToken.length - 10 : 0)}" : "null"}');
 
       if (newAccessToken != null) {
-         final refreshedUser = (data['user_data'] ??
+         Map<String, dynamic> refreshedUser = (data['user_data'] ??
              data['user'] ??
              session?['user_data']) as Map<String, dynamic>? ?? {};
+
+         // Safeguard: If refreshedUser is sparse and missing vital company/tenant details,
+         // preserve the existing session's user mapping data.
+         final oldUserData = session?['user_data'] as Map<String, dynamic>?;
+         if (oldUserData != null) {
+           final hasTenant = refreshedUser.containsKey('tenant_id') || 
+                             (refreshedUser['account'] is Map && refreshedUser['account'].containsKey('tenant_id')) ||
+                             (refreshedUser['user'] is Map && refreshedUser['user'].containsKey('tenant_id'));
+           if (!hasTenant) {
+             refreshedUser = {...oldUserData, ...refreshedUser};
+           }
+         }
 
          await _sessionService.setSession(
            accessToken: newAccessToken,

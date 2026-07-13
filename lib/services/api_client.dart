@@ -38,8 +38,20 @@ class ApiClient {
         // 1. Proactive Refresh (avoid most 401s completely)
         if (options.path != ApiEndpoints.driverRefresh) {
           final session = SessionService();
+          
+          // Enhanced logging: JWT expiration check
+          final sessionData = await session.getSession();
+          final expiresAt = sessionData?['expiresAt'] as int?;
+          if (expiresAt != null) {
+            final expiryDateTime = DateTime.fromMillisecondsSinceEpoch(expiresAt);
+            debugPrint('⏰ [ApiClient] Token expiration: $expiryDateTime (Expires in: ${expiryDateTime.difference(DateTime.now()).inMinutes} mins)');
+          } else {
+            debugPrint('⏰ [ApiClient] Token expiration: Unknown (No exp claim in JWT)');
+          }
+
           final needsRefresh = await session.shouldRefreshToken();
           if (needsRefresh) {
+            debugPrint('⏰ [ApiClient] Silent proactive refresh triggered...');
             final result = await _refreshTokenOnce();
             if (result?['errorCode'] == 'INVALID_REFRESH') {
               final bool isOngoingRide = LocationService().activeRouteId != null;
@@ -61,13 +73,31 @@ class ApiClient {
 
         // 2. Don't read SecureStorage directly - delegate to SessionService
         if (options.path != ApiEndpoints.driverRefresh) {
-          final token = await SessionService().getAccessToken();
+          final sessionService = SessionService();
+          final token = await sessionService.getAccessToken();
           if (token != null) {
             options.headers['Authorization'] = 'Bearer $token';
-            debugPrint('🔑 Authorization token injected: ...${token.substring(token.length > 10 ? token.length - 10 : 0)}');
+            debugPrint('🔑 Current token: $token');
+          }
+
+          // Inject custom routing headers
+          final tenantId = await sessionService.getTenantId();
+          if (tenantId != null && tenantId.isNotEmpty) {
+            options.headers['X-Tenant-Id'] = tenantId;
+            debugPrint('🏢 X-Tenant-Id header injected: $tenantId');
+          }
+          final driverId = await sessionService.getDriverId();
+          if (driverId != null && driverId.isNotEmpty) {
+            options.headers['X-Driver-Id'] = driverId;
+            debugPrint('👤 X-Driver-Id header injected: $driverId');
+          }
+          final vendorId = await sessionService.getVendorId();
+          if (vendorId != null && vendorId.isNotEmpty) {
+            options.headers['X-Vendor-Id'] = vendorId;
+            debugPrint('🏭 X-Vendor-Id header injected: $vendorId');
           }
         } else {
-          debugPrint('🔑 Skipping Authorization header for refresh request');
+          debugPrint('🔑 Skipping Authorization and tenant headers for refresh request');
         }
         _logRequest(options);
         return handler.next(options);
@@ -136,11 +166,11 @@ class ApiClient {
           // Prevent retry loop: allow each request only ONE retry
           final retryCount = (e.requestOptions.extra['retryCount'] as int?) ?? 0;
           if (retryCount >= 1) {
-            debugPrint('⚠️ Already retried once — not retrying again');
+            debugPrint('⚠️ Already retried once (Attempt $retryCount) — not retrying again');
             return handler.next(e);
           }
 
-          debugPrint('🔒 401 — attempting silent token refresh...');
+          debugPrint('🔒 401/403 — attempting silent token refresh for retry...');
           final refreshResult = await _refreshTokenOnce();
           final newToken = refreshResult?['access_token'] as String?;
 
@@ -149,6 +179,7 @@ class ApiClient {
             final opts = e.requestOptions;
             opts.headers['Authorization'] = 'Bearer $newToken';
             opts.extra['retryCount'] = retryCount + 1;
+            debugPrint('🔄 [ApiClient] Retrying original request to ${opts.uri} (Attempt ${opts.extra['retryCount']})...');
             try {
               final retryResponse = await _dio.fetch(opts);
               return handler.resolve(retryResponse);
@@ -184,11 +215,12 @@ class ApiClient {
   // Calls the single-coordination refreshToken() in AuthService.
   Future<Map<String, dynamic>?> _refreshTokenOnce() async {
     try {
+      debugPrint('🔄 [ApiClient] Initiating silent token refresh call...');
       final result = await AuthService().refreshToken();
       if (result['success'] == true) {
-        debugPrint('✅ Token refreshed successfully');
+        debugPrint('✅ [ApiClient] Token refreshed successfully');
       } else {
-        debugPrint('⚠️ Refresh failed: ${result['error']}');
+        debugPrint('⚠️ [ApiClient] Refresh failed: ${result['error']}');
       }
       return result;
     } catch (e) {

@@ -123,6 +123,15 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Called when the app resumes from the background.
+  /// Revalidates the session and proactively refreshes the access token if it's near expiry.
+  Future<void> handleAppResume() async {
+    debugPrint('📱 [AuthProvider] App resumed from background — checking session validity');
+    final hasValid = await _sessionService.hasValidSession();
+    if (!hasValid) return;
+    await _proactiveTokenRefresh();
+  }
+
   // ── Unauthenticated fallback ───────────────────────────────────────────────
   Future<void> _resolveUnauthenticated() async {
     final tempSession = await _sessionService.getTempSession();

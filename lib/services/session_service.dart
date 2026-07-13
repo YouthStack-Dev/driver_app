@@ -162,6 +162,30 @@ class SessionService {
     return session?['user_data'] as Map<String, dynamic>?;
   }
 
+  /// Returns the stored driver ID, or null.
+  Future<String?> getDriverId() async {
+    final session = await getSession();
+    final userData = session?['user_data'];
+    if (userData == null) return null;
+    return _extractDriverId(userData)?.toString();
+  }
+
+  /// Returns the stored tenant ID, or null.
+  Future<String?> getTenantId() async {
+    final session = await getSession();
+    final userData = session?['user_data'];
+    if (userData == null) return null;
+    return _extractTenantId(userData)?.toString();
+  }
+
+  /// Returns the stored vendor ID, or null.
+  Future<String?> getVendorId() async {
+    final session = await getSession();
+    final userData = session?['user_data'];
+    if (userData == null) return null;
+    return _extractVendorId(userData)?.toString();
+  }
+
   /// Returns true if a valid, non-null session with access token exists.
   Future<bool> hasValidSession() async {
     final session = await getSession();
