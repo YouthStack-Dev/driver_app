@@ -38,12 +38,12 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     end: DateTime.now(),
   );
 
-  Map<String, dynamic>? _summary;
   List<dynamic> _bookings = [];
   List<Map<String, dynamic>> _routes = [];
   bool _isLoading = false;
   bool _isDownloading = false;
   String? _error;
+  final Set<dynamic> _expandedRoutes = {};
 
   @override
   void initState() {
@@ -75,7 +75,6 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
       );
       if (result['success'] == true) {
         setState(() {
-          _summary = result['summary'];
           _bookings = result['bookings'] ?? [];
           _routes = _groupBookingsIntoRoutes(_bookings);
         });
@@ -121,11 +120,21 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
       final isOut = routeCode.toString().toUpperCase().contains('OUT') || 
                     (first['drop_location'] != null && first['pickup_location'] == null);
 
-      final double? distKm = 
-          (first['actual_distance_km'] is num ? (first['actual_distance_km'] as num).toDouble() : null) ??
-          (first['estimated_distance_km'] is num ? (first['estimated_distance_km'] as num).toDouble() : null) ??
-          (first['actual_total_distance'] is num ? (first['actual_total_distance'] as num).toDouble() : null) ??
-          (first['estimated_total_distance'] is num ? (first['estimated_total_distance'] as num).toDouble() : null);
+      // Search ALL bookings in the route for a valid distance value.
+      // The API may put it only on one booking, and may send it as a String.
+      double? routeDistKm;
+      for (final bk in routeBookings) {
+        routeDistKm =
+            _toDouble(bk['actual_distance_km']) ??
+            _toDouble(bk['estimated_distance_km']) ??
+            _toDouble(bk['actual_total_distance']) ??
+            _toDouble(bk['estimated_total_distance']) ??
+            _toDouble(bk['route_distance_km']) ??
+            _toDouble(bk['total_distance_km']) ??
+            _toDouble(bk['distance_km']) ??
+            _toDouble(bk['distance']);
+        if (routeDistKm != null && routeDistKm > 0) break;
+      }
 
       routeList.add({
         'route_id': rId,
@@ -135,7 +144,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
         'status': first['route_status'] ?? 'Completed',
         'stops': stops,
         'summary': {
-          'total_distance_km': distKm,
+          'total_distance_km': routeDistKm,
           'total_time_minutes': first['actual_total_time_minutes'],
         }
       });
@@ -305,94 +314,6 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
   }
 
 
-  Widget _buildSummaryPanel() {
-    if (_summary == null || _summary!.isEmpty) return const SizedBox.shrink();
-
-    final totalRoutes   = _summary!['total_routes'] ?? 0;
-    final totalBookings = _summary!['total_bookings'] ?? 0;
-    final completed     = _summary!['completed'] ?? 0;
-    final noShow        = _summary!['no_show'] ?? 0;
-    final cancelled     = _summary!['cancelled'] ?? 0;
-    final summaryTotal  = _summary!['total_actual_km'] ?? 
-                          _summary!['total_actual_distance'] ?? 
-                          _summary!['total_distance_km'] ?? 
-                          _summary!['total_distance'];
-                          
-    double totalKm = 0.0;
-    if (summaryTotal != null && (summaryTotal as num).toDouble() > 0.0) {
-      totalKm = (summaryTotal as num).toDouble();
-    } else {
-      // Fallback: sum up the distance from individual routes
-      for (final r in _routes) {
-        final dist = r['summary']?['total_distance_km'];
-        if (dist is num) {
-          totalKm += dist.toDouble();
-        }
-      }
-    }
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _C.border),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Performance Summary',
-              style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.bold, fontSize: 13.5, color: _C.textPrimary)),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _summaryItem('Routes', '$totalRoutes', _C.blue),
-              _summaryItem('Bookings', '$totalBookings', _C.green),
-              _summaryItem('Completed', '$completed', _C.green),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _summaryItem('No Show', '$noShow', _C.red),
-              _summaryItem('Cancelled', '$cancelled', _C.textSecondary),
-              _summaryItem('Total Dist.', '${(totalKm is num ? totalKm.toDouble() : 0.0).toStringAsFixed(1)} km', _C.amber),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _summaryItem(String label, String value, Color color) {
-    return Expanded(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.1)),
-        ),
-        child: Column(
-          children: [
-            Text(value,
-                style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w800, fontSize: 13, color: _C.textPrimary)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: GoogleFonts.poppins(
-                    fontSize: 9, fontWeight: FontWeight.w600, color: _C.textSecondary)),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildBody() {
     if (_isLoading) return const Center(child: CircularProgressIndicator(color: _C.blue, strokeWidth: 2.5));
@@ -401,14 +322,11 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
 
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 24),
-      itemCount: _routes.length + 1,
-      itemBuilder: (_, i) {
-        if (i == 0) return _buildSummaryPanel();
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _buildRouteCard(_routes[i - 1]),
-        );
-      },
+      itemCount: _routes.length,
+      itemBuilder: (_, i) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: _buildRouteCard(_routes[i]),
+      ),
     );
   }
 
@@ -425,15 +343,16 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
       return st == 'NoShow' || st == 'No Show' || st == 'No-Show';
     }).length;
 
-    final double? distKm = route['summary']?['total_distance_km'] is num
-        ? (route['summary']['total_distance_km'] as num).toDouble()
-        : null;
+    final double? distKm = _toDouble(route['summary']?['total_distance_km']);
     final int? mins = route['summary']?['total_time_minutes'] is num
         ? (route['summary']['total_time_minutes'] as num).round()
         : null;
 
+    final bool isExpanded = _expandedRoutes.contains(routeId);
+
     return Container(
       margin: const EdgeInsets.only(top: 16),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -445,48 +364,67 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 44, height: 44,
-                  decoration: BoxDecoration(color: _C.greenBg, borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.check_circle_rounded, color: _C.green, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(routeCode,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.w800, fontSize: 14.5, color: _C.textPrimary)),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          _chip(logType == 'IN' ? 'Pickup' : 'Drop',
-                              logType == 'IN' ? _C.greenBg : _C.amberBg,
-                              logType == 'IN' ? _C.green   : _C.amber),
-                          if (shiftTime.isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            const Icon(Icons.access_time_rounded, size: 12, color: _C.textSecondary),
-                            const SizedBox(width: 3),
-                            Text(shiftTime,
-                                style: GoogleFonts.poppins(
-                                    fontSize: 11.5, color: _C.textSecondary, fontWeight: FontWeight.w600)),
-                          ],
-                        ],
-                      ),
-                    ],
+          // ── Tappable header ──────────────────────────────────────────────
+          InkWell(
+            onTap: () => setState(() {
+              if (isExpanded) {
+                _expandedRoutes.remove(routeId);
+              } else {
+                _expandedRoutes.add(routeId);
+              }
+            }),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(color: _C.greenBg, borderRadius: BorderRadius.circular(12)),
+                    child: const Icon(Icons.check_circle_rounded, color: _C.green, size: 24),
                   ),
-                ),
-                _chip('COMPLETED', _C.greenBg, _C.green, dot: true),
-              ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(routeCode,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w800, fontSize: 14.5, color: _C.textPrimary)),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            _chip(logType == 'IN' ? 'Pickup' : 'Drop',
+                                logType == 'IN' ? _C.greenBg : _C.amberBg,
+                                logType == 'IN' ? _C.green   : _C.amber),
+                            if (shiftTime.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              const Icon(Icons.access_time_rounded, size: 12, color: _C.textSecondary),
+                              const SizedBox(width: 3),
+                              Text(shiftTime,
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 11.5, color: _C.textSecondary, fontWeight: FontWeight.w600)),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  _chip('COMPLETED', _C.greenBg, _C.green, dot: true),
+                  const SizedBox(width: 6),
+                  // Animated chevron indicates expand / collapse
+                  AnimatedRotation(
+                    turns: isExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 250),
+                    child: const Icon(Icons.keyboard_arrow_down_rounded,
+                        color: _C.textSecondary, size: 22),
+                  ),
+                ],
+              ),
             ),
           ),
+          // ── Stats bar (always visible) ───────────────────────────────────
           Container(
             decoration: BoxDecoration(
               color: _C.bg,
@@ -501,7 +439,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                 const SizedBox(width: 8),
                 _statPill(Icons.cancel_rounded, '$noShow', 'No Show',
                     noShow > 0 ? _C.red : _C.textSecondary),
-                if (distKm != null) ...[
+                if (distKm != null && distKm >= 0.05) ...[
                   const SizedBox(width: 8),
                   _statPill(Icons.route_rounded,
                       '${distKm.toStringAsFixed(1)} km', 'Distance', _C.amber),
@@ -509,116 +447,123 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
               ],
             ),
           ),
-          if (stops.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-              child: Column(
-                children: stops.asMap().entries.map((e) {
-                  final i    = e.key;
-                  final stop = e.value;
-                  final st   = stop['status'] ?? '';
-                  final isDone   = st == 'Completed';
-                  final isNoShow = st == 'NoShow' || st == 'No Show' || st == 'No-Show';
-                  final name     = stop['employee_name'] ?? 'Passenger';
-                  final address  = stop['pickup_location'] ?? stop['drop_location'] ?? '';
-                  final eta      = stop['estimated_pick_up_time'] ?? '';
-
-                  final Color dotColor = isDone ? _C.green : (isNoShow ? _C.red : _C.amber);
-                  final IconData dotIcon = isDone
-                      ? Icons.check_circle_rounded
-                      : (isNoShow ? Icons.cancel_rounded : Icons.radio_button_unchecked_rounded);
-
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Column(
-                          children: [
-                            Icon(dotIcon, color: dotColor, size: 18),
-                            if (i < stops.length - 1)
-                              Container(width: 1.5, height: 20, color: _C.border),
-                          ],
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
+          // ── Collapsible: stops list + time footer ────────────────────────
+          AnimatedSize(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+            child: isExpanded
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (stops.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(name,
-                                        style: GoogleFonts.poppins(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13,
-                                            color: _C.textPrimary)),
-                                  ),
-                                  _chip(
-                                    isDone ? 'Boarded' : (isNoShow ? 'No Show' : st),
-                                    isDone ? _C.greenBg : (isNoShow ? _C.redBg : _C.amberBg),
-                                    isDone ? _C.green   : (isNoShow ? _C.red   : _C.amber),
-                                  ),
-                                ],
-                              ),
-                              if (address.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Row(
+                            children: stops.asMap().entries.map((e) {
+                              final i    = e.key;
+                              final stop = e.value;
+                              final st   = stop['status'] ?? '';
+                              final isDone   = st == 'Completed';
+                              final isNoShow = st == 'NoShow' || st == 'No Show' || st == 'No-Show';
+                              final name     = stop['employee_name'] ?? 'Passenger';
+                              final address  = stop['pickup_location'] ?? stop['drop_location'] ?? '';
+                              final eta      = stop['estimated_pick_up_time'] ?? '';
+
+                              final Color dotColor = isDone ? _C.green : (isNoShow ? _C.red : _C.amber);
+                              final IconData dotIcon = isDone
+                                  ? Icons.check_circle_rounded
+                                  : (isNoShow ? Icons.cancel_rounded : Icons.radio_button_unchecked_rounded);
+
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Icon(Icons.location_on_rounded,
-                                        size: 11, color: _C.textSecondary),
-                                    const SizedBox(width: 3),
+                                    Column(
+                                      children: [
+                                        Icon(dotIcon, color: dotColor, size: 18),
+                                        if (i < stops.length - 1)
+                                          Container(width: 1.5, height: 20, color: _C.border),
+                                      ],
+                                    ),
+                                    const SizedBox(width: 10),
                                     Expanded(
-                                      child: Text(address,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: GoogleFonts.poppins(
-                                              fontSize: 11, color: _C.textSecondary)),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(name,
+                                                    style: GoogleFonts.poppins(
+                                                        fontWeight: FontWeight.w600,
+                                                        fontSize: 13,
+                                                        color: _C.textPrimary)),
+                                              ),
+                                              _chip(
+                                                isDone ? 'Boarded' : (isNoShow ? 'No Show' : st),
+                                                isDone ? _C.greenBg : (isNoShow ? _C.redBg : _C.amberBg),
+                                                isDone ? _C.green   : (isNoShow ? _C.red   : _C.amber),
+                                              ),
+                                            ],
+                                          ),
+                                          if (address.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Row(
+                                              children: [
+                                                const Icon(Icons.location_on_rounded,
+                                                    size: 11, color: _C.textSecondary),
+                                                const SizedBox(width: 3),
+                                                Expanded(
+                                                  child: Text(address,
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                      style: GoogleFonts.poppins(
+                                                          fontSize: 11, color: _C.textSecondary)),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                          if (eta.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Row(
+                                              children: [
+                                                const Icon(Icons.access_time_rounded,
+                                                    size: 11, color: _C.textSecondary),
+                                                const SizedBox(width: 3),
+                                                Text(_formatTime(eta),
+                                                    style: GoogleFonts.poppins(
+                                                        fontSize: 11, color: _C.textSecondary)),
+                                              ],
+                                            ),
+                                          ],
+                                        ],
+                                      ),
                                     ),
                                   ],
                                 ),
-                              ],
-                              if (eta.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.access_time_rounded,
-                                        size: 11, color: _C.textSecondary),
-                                    const SizedBox(width: 3),
-                                    Text(_formatTime(eta),
-                                        style: GoogleFonts.poppins(
-                                            fontSize: 11, color: _C.textSecondary)),
-                                  ],
-                                ),
-                              ],
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      if (mins != null)
+                        Container(
+                          color: _C.blueBg,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.timer_outlined, size: 13, color: _C.blue),
+                              const SizedBox(width: 6),
+                              Text('Total route time: $mins min',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 11.5, color: _C.blue, fontWeight: FontWeight.w600)),
                             ],
                           ),
                         ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          if (mins != null)
-            Container(
-              decoration: BoxDecoration(
-                color: _C.blueBg,
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(18), bottomRight: Radius.circular(18),
-                ),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.timer_outlined, size: 13, color: _C.blue),
-                  const SizedBox(width: 6),
-                  Text('Total route time: $mins min',
-                      style: GoogleFonts.poppins(
-                          fontSize: 11.5, color: _C.blue, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     );
@@ -701,6 +646,14 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
         ),
       ),
     );
+  }
+
+  /// Safely converts a dynamic API value to double.
+  /// Handles both numeric types and string-encoded numbers (e.g. "12.5").
+  double? _toDouble(dynamic val) {
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val);
+    return null;
   }
 
   String _formatTime(String raw) {

@@ -47,7 +47,10 @@ class ApiClient {
       // ── Request ────────────────────────────────────────────────────────────
       onRequest: (options, handler) async {
         // 1. Proactive Refresh (avoid most 401s completely)
-        if (options.path != ApiEndpoints.driverRefresh) {
+        // Also skip for logout — refreshing before logout causes a deadlock
+        // when the refresh itself has already failed (e.g. DEVICE_CONFLICT).
+        if (options.path != ApiEndpoints.driverRefresh &&
+            options.path != ApiEndpoints.logout) {
           final session = SessionService();
           
           // Enhanced logging: JWT expiration check
@@ -89,7 +92,8 @@ class ApiClient {
         }
 
         // 2. Don't read SecureStorage directly - delegate to SessionService
-        if (options.path != ApiEndpoints.driverRefresh) {
+        if (options.path != ApiEndpoints.driverRefresh &&
+            options.path != ApiEndpoints.logout) {
           final sessionService = SessionService();
           final token = await sessionService.getAccessToken();
           if (token != null) {
@@ -174,10 +178,19 @@ class ApiClient {
 
           // Avoid infinite refresh loop: if the refresh endpoint itself 401s or 403s
           // (e.g. INVALID_TOKEN, TOKEN_EXPIRED, DEVICE_NOT_AUTHORIZED etc.)
+          // Also skip for logout — we're already logging out, no point retrying.
           if (e.requestOptions.path == ApiEndpoints.driverRefresh) {
             debugPrint('🔒 Refresh endpoint returned $status — session is invalid.');
-            // Refresh token is truly invalid — only safe time to logout
-            await _safeLogout();
+            if (isOngoingRide) {
+              debugPrint('🛡️ Active ride — suppressing logout on refresh-endpoint $status.');
+            } else {
+              // Refresh token is truly invalid — only safe time to logout
+              await _safeLogout();
+            }
+            return handler.next(e);
+          }
+          if (e.requestOptions.path == ApiEndpoints.logout) {
+            debugPrint('🔒 Logout endpoint returned $status — ignoring, already logging out.');
             return handler.next(e);
           }
 

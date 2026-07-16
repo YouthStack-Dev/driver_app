@@ -154,8 +154,13 @@ class AuthProvider extends ChangeNotifier {
         debugPrint('⚠️ [AuthProvider] Resume refresh failed: ${result['error']} (${result['errorCode']})');
         // If the refresh token itself is invalid, logout cleanly
         if (result['errorCode'] == 'INVALID_REFRESH') {
-          debugPrint('🔒 [AuthProvider] Refresh token invalid — logging out');
-          await logout();
+          final bool isOngoingRide = LocationService().activeRouteId != null;
+          if (isOngoingRide) {
+            debugPrint('🛡️ [AuthProvider] Active ride — suppressing logout on resume refresh failure.');
+          } else {
+            debugPrint('🔒 [AuthProvider] Refresh token invalid — logging out');
+            await logout();
+          }
         }
       }
     } catch (e) {
