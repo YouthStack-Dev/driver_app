@@ -226,19 +226,19 @@ class SessionService {
 
       if (expiresAt == null) {
         // No exp claim in JWT — fall back to login_time.
-        // Assume a 1-hour access token lifetime (common default).
-        // If the session is older than (60 - threshold) minutes, refresh.
+        // Assume a 15-minute access token lifetime (matches server DRIVER_ACCESS_TOKEN_TTL=900s).
+        // Only refresh if session is older than (15 - threshold) minutes.
+        // Use a minimum threshold of 2 minutes to avoid aggressive refresh loops.
         final loginTime = session?['login_time'] as int?;
         if (loginTime == null) return false; // Can't determine — assume OK
 
-        // Access token TTL is 900 s (15 min) per API docs.
-        // Treat any session older than (15 - threshold) minutes as needing refresh.
         const assumedLifetimeMinutes = 15; // Matches server DRIVER_ACCESS_TOKEN_TTL=900s
+        final effectiveThreshold = thresholdMinutes.clamp(2, assumedLifetimeMinutes - 1);
         final ageMinutes = (DateTime.now().millisecondsSinceEpoch - loginTime) ~/ 60000;
-        final needsRefresh = ageMinutes >= (assumedLifetimeMinutes - thresholdMinutes);
+        final needsRefresh = ageMinutes >= (assumedLifetimeMinutes - effectiveThreshold);
         if (needsRefresh) {
           debugPrint(
-            '⏰ SessionService: No exp claim — session age ${ageMinutes}m >= ${assumedLifetimeMinutes - thresholdMinutes}m threshold — refresh needed');
+            '⏰ SessionService: No exp claim — session age ${ageMinutes}m >= ${assumedLifetimeMinutes - effectiveThreshold}m threshold — refresh needed');
         }
         return needsRefresh;
       }

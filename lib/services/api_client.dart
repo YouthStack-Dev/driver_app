@@ -18,6 +18,10 @@ class ApiClient {
   // instead of just clearing the session storage.
   Future<void> Function()? _logoutCallback;
   DateTime? _lastLogoutAttempt;
+  
+  // Cooldown for proactive refresh to avoid hammering the refresh endpoint
+  DateTime? _lastProactiveRefresh;
+  static const _proactiveRefreshCooldown = Duration(minutes: 2);
 
   /// Register the full logout handler (called by AuthProvider at startup).
   void setLogoutCallback(Future<void> Function() callback) {
@@ -65,28 +69,36 @@ class ApiClient {
 
           final needsRefresh = await session.shouldRefreshToken();
           if (needsRefresh) {
-            debugPrint('⏰ [ApiClient] Silent proactive refresh triggered...');
-            final result = await _refreshTokenOnce();
-            final proactiveErrorCode = result?['errorCode'];
+            // Cooldown: don't hammer the refresh endpoint if we just tried
+            final now = DateTime.now();
+            if (_lastProactiveRefresh != null &&
+                now.difference(_lastProactiveRefresh!) < _proactiveRefreshCooldown) {
+              debugPrint('⏰ [ApiClient] Proactive refresh on cooldown, skipping');
+            } else {
+              _lastProactiveRefresh = now;
+              debugPrint('⏰ [ApiClient] Silent proactive refresh triggered...');
+              final result = await _refreshTokenOnce();
+              final proactiveErrorCode = result?['errorCode'];
 
-            if (proactiveErrorCode == 'INVALID_REFRESH') {
-              final bool isOngoingRide = LocationService().activeRouteId != null;
-              if (isOngoingRide) {
-                debugPrint('🛡️ Active ride — suppressing logout on proactive refresh error.');
-                return handler.next(options);
+              if (proactiveErrorCode == 'INVALID_REFRESH') {
+                final bool isOngoingRide = LocationService().activeRouteId != null;
+                if (isOngoingRide) {
+                  debugPrint('🛡️ Active ride — suppressing logout on proactive refresh error.');
+                  return handler.next(options);
+                }
+                debugPrint('🔒 [ApiClient] Proactive refresh: INVALID_REFRESH — logging out');
+                await _safeLogout();
+                return handler.reject(
+                  DioException(
+                    requestOptions: options,
+                    error: result?['error'] ?? 'Session expired',
+                    type: DioExceptionType.badResponse,
+                  ),
+                );
+              } else if (proactiveErrorCode == 'SERVER_ERROR') {
+                // 500 REFRESH_FAILED — transient server issue, never logout
+                debugPrint('⚠️ [ApiClient] Proactive refresh hit server error — proceeding with current token');
               }
-              debugPrint('🔒 [ApiClient] Proactive refresh: INVALID_REFRESH — logging out');
-              await _safeLogout();
-              return handler.reject(
-                DioException(
-                  requestOptions: options,
-                  error: result?['error'] ?? 'Session expired',
-                  type: DioExceptionType.badResponse,
-                ),
-              );
-            } else if (proactiveErrorCode == 'SERVER_ERROR') {
-              // 500 REFRESH_FAILED — transient server issue, never logout
-              debugPrint('⚠️ [ApiClient] Proactive refresh hit server error — proceeding with current token');
             }
           }
         }
