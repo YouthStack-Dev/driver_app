@@ -38,6 +38,14 @@ class BookingProvider extends ChangeNotifier {
       final result = await _routeService.getDriverTrips(statusFilter: status);
       if (result['success'] == true) {
         _routes = result['routes'] ?? [];
+        debugPrint('🌐 [API Response] Routes Payload count: ${_routes.length}');
+        for (final r in _routes) {
+          final rStops = r['stops'] as List? ?? [];
+          debugPrint('🌐 [API Response] Route #${r['route_id']} status: ${r['status']} | Stops count: ${rStops.length}');
+          for (final stop in rStops) {
+            debugPrint('👤 [Stop Data] Booking ID: ${stop['booking_id']} | Employee: ${stop['employee_name']} | Status: ${stop['status']} | Keys in stop: ${stop.keys.toList()}');
+          }
+        }
         
         // Safety catch: If backend says there are no ongoing trips, 
         // ensure background tracking and overlays are stopped to prevent ghost notifications.

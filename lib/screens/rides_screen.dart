@@ -8,6 +8,9 @@ import '../providers/location_provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/permission_service.dart';
 import '../widgets/app_drawer.dart';
+import '../services/driver_config_service.dart';
+import '../services/session_service.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'chat_screen.dart';
 // ─── Light Theme Color Tokens ────────────────────────────────────────────────
@@ -44,6 +47,12 @@ class _RidesScreenState extends State<RidesScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final sessionService = SessionService();
+      final accessToken = await sessionService.getAccessToken();
+      final refreshToken = await sessionService.getRefreshToken();
+      debugPrint('🔑 [CAPTURED ACCESS TOKEN]: $accessToken');
+      debugPrint('🔑 [CAPTURED REFRESH TOKEN]: $refreshToken');
+
       if (!mounted) return;
       final provider = Provider.of<BookingProvider>(context, listen: false);
       provider.clearData();
@@ -385,6 +394,7 @@ class _RidesScreenState extends State<RidesScreen> {
   // ─── Route Card ─────────────────────────────────────────────────────────────
 
   Widget _buildRouteCard(dynamic route, BookingProvider provider) {
+    final locationProvider = Provider.of<LocationProvider>(context);
     final bool isOngoing  = route['status'] == 'Ongoing';
     final bool isAssigned = route['status'] == 'Driver Assigned';
     final stops     = route['stops'] as List? ?? [];
@@ -508,19 +518,20 @@ class _RidesScreenState extends State<RidesScreen> {
                 children: [
                   Builder(
                     builder: (context) {
-                      final currentIdx = stops.indexWhere(
-                        (s) => s['status'] != 'Completed' && s['status'] != 'NoShow' && s['status'] != 'No Show' && s['status'] != 'No-Show',
-                      );
+                      int currentIdx = stops.indexWhere((s) => s['status'] == 'Scheduled');
+                      if (currentIdx == -1) {
+                        currentIdx = stops.indexWhere((s) => s['status'] == 'Ongoing');
+                      }
                       final displayIdx = currentIdx == -1 ? stops.length : currentIdx + 1;
                       return _buildSummaryStatPill(Icons.place_rounded, '$displayIdx/${stops.length}', 'Stops', _C.purple);
                     },
                   ),
                   const SizedBox(width: 10),
                   _buildSummaryStatPill(Icons.route_rounded,
-                      '${(route['actual_distance_km'] ?? route['estimated_distance_km'] ?? route['summary']?['total_distance_km'] ?? 0).toStringAsFixed(1)} km', 'Distance', _C.green),
+                      '${(route['actual_total_distance'] ?? route['estimated_total_distance'] ?? route['actual_distance_km'] ?? route['estimated_distance_km'] ?? route['summary']?['total_distance_km'] ?? 0).toDouble().toStringAsFixed(1)} km', 'Distance', _C.green),
                   const SizedBox(width: 10),
                   _buildSummaryStatPill(Icons.timer_rounded,
-                      '${(route['summary']?['total_time_minutes'] ?? 0).round()} min', 'ETA', _C.amber),
+                      '${(route['actual_total_time'] ?? route['estimated_total_time'] ?? route['summary']?['total_time_minutes'] ?? 0).toDouble().round()} min', 'ETA', _C.amber),
                 ],
               ),
             ),
@@ -604,18 +615,128 @@ class _RidesScreenState extends State<RidesScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     () {
-                      final currentIdx = stops.indexWhere(
-                        (s) => s['status'] != 'Completed' && s['status'] != 'NoShow' && s['status'] != 'No Show' && s['status'] != 'No-Show',
-                      );
+                      final logType = route['log_type'] ?? 'IN';
+                      final bool isLogout = logType == 'OUT';
+                      final bool hasScheduled = stops.any((s) => s['status'] == 'Scheduled');
+
+                      if (isLogout && hasScheduled) {
+                        // ─── LOGOUT BOARDING PHASE ───
+                        // Display all employees simultaneously in their exact backend order
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildSectionHeader(
+                              'BOARD PASSENGERS (${stops.length})',
+                              subtitle: 'Tap Board on each employee to board them',
+                            ),
+                            const SizedBox(height: 10),
+                            () {
+                              final firstStop = stops.first;
+                              final double? officeLat = firstStop['pickup_latitude'];
+                              final double? officeLng = firstStop['pickup_longitude'];
+                              final String officeAddress = firstStop['pickup_location'] ?? 'Office';
+                              final bool showNav = _shouldShowNavigate(officeLat, officeLng, locationProvider);
+                              if (officeLat != null && officeLng != null && showNav) {
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(color: _C.border),
+                                    ),
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.location_on_rounded, color: _C.blue, size: 20),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text('Pickup Location (Office)',
+                                                      style: GoogleFonts.poppins(
+                                                          fontWeight: FontWeight.bold, fontSize: 13, color: _C.textPrimary)),
+                                                  Text(officeAddress,
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                      style: GoogleFonts.poppins(fontSize: 11, color: _C.textSecondary)),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 10),
+                                        ElevatedButton.icon(
+                                          onPressed: () => _launchMaps(officeLat, officeLng, officeAddress),
+                                          icon: const Icon(Icons.navigation_rounded, size: 15, color: Colors.white),
+                                          label: Text(
+                                            'Navigate to Pickup Point',
+                                            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                                          ),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: _C.blue,
+                                            foregroundColor: Colors.white,
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                            padding: const EdgeInsets.symmetric(vertical: 11),
+                                            elevation: 0,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }
+                              return const SizedBox.shrink();
+                            }(),
+                            ...stops.asMap().entries.map((e) {
+                              final index = e.key;
+                              final stop = e.value;
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _buildLogoutBoardCard(stop, route, provider, index),
+                              );
+                            }),
+                          ],
+                        );
+                      }
+
+                      // ─── LOGIN SHIFT OR LOGOUT DROP-OFF PHASE ───
+                      // Sequential stops processing:
+                      // First look for any Scheduled stop (boarding phase)
+                      int currentIdx = stops.indexWhere((s) => s['status'] == 'Scheduled');
+                      // If no Scheduled stops are left, look for the first Ongoing stop (drop-off phase)
+                      if (currentIdx == -1) {
+                        currentIdx = stops.indexWhere((s) => s['status'] == 'Ongoing');
+                      }
+
                       final upcomingStops = stops
                           .asMap()
                           .entries
-                          .where((e) =>
-                              e.key != currentIdx &&
-                              e.value['status'] != 'Completed' &&
-                              e.value['status'] != 'NoShow' &&
-                              e.value['status'] != 'No Show' &&
-                              e.value['status'] != 'No-Show')
+                          .where((e) {
+                            if (e.key == currentIdx) return false;
+                            final s = e.value['status'];
+                            if (logType == 'IN') {
+                              return s == 'Scheduled';
+                            } else {
+                              return s == 'Ongoing';
+                            }
+                          })
+                          .toList();
+
+                      final completedAndOngoingStops = stops
+                          .asMap()
+                          .entries
+                          .where((e) {
+                            if (e.key == currentIdx) return false;
+                            final s = e.value['status'];
+                            final isCompletedOrNoShow = s == 'Completed' || s == 'NoShow' || s == 'No Show' || s == 'No-Show';
+                            final isOngoingButNotCurrent = logType == 'IN' && s == 'Ongoing';
+                            return isCompletedOrNoShow || isOngoingButNotCurrent;
+                          })
                           .toList();
 
                       return Column(
@@ -643,13 +764,12 @@ class _RidesScreenState extends State<RidesScreen> {
                               return _buildUpcomingStopTile(stop, route, provider, globalIdx + 1);
                             }),
                           ],
-                          // Completed stops (just list without actions)
-                          ...stops.asMap().entries.where((e) {
-                            final s = e.value['status'];
-                            return s == 'Completed' || s == 'NoShow' || s == 'No Show' || s == 'No-Show';
-                          }).map((e) {
-                            return _buildTimelineStopItem(e.value, route, provider, e.key, e.key == stops.length - 1);
-                          }),
+                          if (completedAndOngoingStops.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            ...completedAndOngoingStops.map((e) {
+                              return _buildTimelineStopItem(e.value, route, provider, e.key, e.key == stops.length - 1);
+                            }),
+                          ],
                         ],
                       );
                     }(),
@@ -941,9 +1061,13 @@ class _RidesScreenState extends State<RidesScreen> {
 
     final bool showPickup = route['status'] == 'Ongoing' && status == 'Scheduled';
     final bool showDrop   = route['status'] == 'Ongoing' && status == 'Ongoing';
+    final logType = route['log_type'] ?? 'IN';
+    final config = DriverConfigService().config;
     final bool isOtpRequired = isOnBoard
-        ? stop['is_deboarding_otp_required'] == true
-        : stop['is_boarding_otp_required'] == true;
+        ? (stop['is_deboarding_otp_required'] == true &&
+            (logType == 'IN' ? config.loginDeboardingOtp : config.logoutDeboardingOtp))
+        : (stop['is_boarding_otp_required'] == true &&
+            (logType == 'IN' ? config.loginBoardingOtp : config.logoutBoardingOtp));
 
     final avatarColor = _avatarColor(initial);
 
@@ -1003,32 +1127,33 @@ class _RidesScreenState extends State<RidesScreen> {
                       Text(passengerName,
                           style: GoogleFonts.poppins(
                               fontWeight: FontWeight.bold, fontSize: 18, color: _C.textPrimary, height: 1.2)),
-                      if (eta.isNotEmpty) ...[
+                      if (eta.isNotEmpty || isOtpRequired) ...[
                         const SizedBox(height: 6),
                         Row(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                  color: _C.blueBg, borderRadius: BorderRadius.circular(6)),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.access_time_rounded, size: 11, color: _C.blue),
-                                  const SizedBox(width: 4),
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('ETA',
-                                          style: GoogleFonts.poppins(
-                                              fontSize: 8, color: _C.blue, fontWeight: FontWeight.bold)),
-                                      Text(_formatTime(eta),
-                                          style: GoogleFonts.poppins(
-                                              fontSize: 10, color: _C.blue, fontWeight: FontWeight.bold)),
-                                    ],
-                                  ),
-                                ],
+                            if (eta.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                    color: _C.blueBg, borderRadius: BorderRadius.circular(6)),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.access_time_rounded, size: 11, color: _C.blue),
+                                    const SizedBox(width: 4),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('ETA',
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 8, color: _C.blue, fontWeight: FontWeight.bold)),
+                                        Text(_formatTime(eta),
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 10, color: _C.blue, fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
                             if (isOtpRequired && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
                               const SizedBox(width: 8),
                               Container(
@@ -1112,7 +1237,7 @@ class _RidesScreenState extends State<RidesScreen> {
             ),
 
           // Navigate button
-          if (lat != null && lng != null)
+          if (lat != null && lng != null && _shouldShowNavigate(lat, lng, Provider.of<LocationProvider>(context)))
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
               child: ElevatedButton.icon(
@@ -1201,9 +1326,10 @@ class _RidesScreenState extends State<RidesScreen> {
   Widget _buildUpcomingStopTile(dynamic stop, dynamic route, BookingProvider provider, int displayIndex) {
     final passengerName = stop['employee_name'] ?? 'Passenger';
     final initial = passengerName.isNotEmpty ? passengerName[0].toUpperCase() : 'P';
-    final address = stop['pickup_location'] ?? stop['drop_location'] ?? '';
-    final eta     = stop['estimated_pick_up_time'] ?? '';
     final status  = stop['status'] ?? 'Scheduled';
+    final bool isOnBoard = status == 'Ongoing';
+    final address = isOnBoard ? (stop['drop_location'] ?? '') : (stop['pickup_location'] ?? stop['drop_location'] ?? '');
+    final eta     = stop['estimated_pick_up_time'] ?? '';
     final avatarColor = _avatarColor(initial);
 
     return Container(
@@ -1285,6 +1411,20 @@ class _RidesScreenState extends State<RidesScreen> {
                   ),
                 const SizedBox(height: 4),
                 _buildStatusBadge(status),
+                if (stop['estimated_distance'] != null) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _C.bg,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: _C.border),
+                    ),
+                    child: Text('${stop['estimated_distance']} km',
+                        style: GoogleFonts.poppins(
+                            fontSize: 8, color: _C.textSecondary, fontWeight: FontWeight.bold)),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1354,8 +1494,199 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
+  Widget _buildLogoutBoardCard(dynamic stop, dynamic route, BookingProvider provider, int index) {
+    final String status  = stop['status'] ?? 'Scheduled';
+    final bool isBoarded = status == 'Ongoing';
+    final bool isCompleted = status == 'Completed' || ['NoShow', 'No Show', 'No-Show'].contains(status);
+    final String passengerName = stop['employee_name'] ?? 'Passenger';
+    final String initial = passengerName.isNotEmpty ? passengerName[0].toUpperCase() : 'P';
+    final Color avatarColor = _avatarColor(initial);
+    final String phone = stop['employee_phone']?.toString() ?? '';
+    final String address = isBoarded ? (stop['drop_location'] ?? '') : (stop['pickup_location'] ?? 'Office');
+    final String eta = stop['estimated_pick_up_time'] ?? '';
+
+    final config = DriverConfigService().config;
+    final bool isOtpRequired = stop['is_boarding_otp_required'] == true && config.logoutBoardingOtp;
+
+    final double? lat = stop['pickup_latitude'];
+    final double? lng = stop['pickup_longitude'];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _C.border),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Index
+              Container(
+                width: 28,
+                height: 28,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: _C.bg,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text('${index + 1}',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 11, color: _C.textSecondary)),
+              ),
+              // Avatar
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: avatarColor.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(initial,
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: avatarColor)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(passengerName,
+                        style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.bold, fontSize: 13.5, color: _C.textPrimary)),
+                    if (address.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(address,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(fontSize: 11, color: _C.textSecondary)),
+                    ],
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _buildStatusBadge(isBoarded ? 'Ongoing' : status),
+                  const SizedBox(height: 6),
+                  _buildCallChatRow(stop, phone),
+                ],
+              ),
+            ],
+          ),
+          if (!isCompleted && !isBoarded && (eta.isNotEmpty || isOtpRequired || stop['estimated_distance'] != null)) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                if (eta.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(color: _C.blueBg, borderRadius: BorderRadius.circular(6)),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.access_time_rounded, size: 10, color: _C.blue),
+                        const SizedBox(width: 4),
+                        Text('ETA: ${_formatTime(eta)}',
+                            style: GoogleFonts.poppins(
+                                fontSize: 10, color: _C.blue, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                if (isOtpRequired)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                        color: _C.amberBg,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: _C.amber.withValues(alpha: 0.3))),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.lock_rounded, size: 10, color: _C.amber),
+                        const SizedBox(width: 4),
+                        Text('OTP Required',
+                            style: GoogleFonts.poppins(
+                                fontSize: 9.5, color: _C.amber, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                if (stop['estimated_distance'] != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _C.bg,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: _C.border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.map_rounded, size: 10, color: _C.textSecondary),
+                        const SizedBox(width: 4),
+                        Text('${stop['estimated_distance']} km',
+                            style: GoogleFonts.poppins(
+                                fontSize: 9.5, color: _C.textSecondary, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+          if (status == 'Scheduled') ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _handlePickup(stop, route, provider),
+                    icon: const Icon(Icons.check_circle_outline_rounded, size: 15, color: Colors.white),
+                    label: Text(
+                      isOtpRequired ? 'Board (OTP)' : 'Board',
+                      style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isOtpRequired ? _C.purple : _C.green,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      minimumSize: const Size(0, 48),
+                      padding: const EdgeInsets.symmetric(vertical: 0),
+                      elevation: 0,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _handleNoShow(stop, route, provider),
+                    icon: const Icon(Icons.cancel_outlined, size: 14, color: _C.red),
+                    label: Text('No Show',
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: _C.red)),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: _C.red.withValues(alpha: 0.4)),
+                      backgroundColor: _C.redBg,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      minimumSize: const Size(0, 48),
+                      padding: const EdgeInsets.symmetric(vertical: 0),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildPassengerCard(dynamic stop, dynamic route, BookingProvider provider, Color statusColor) {
     final String status  = stop['status'] ?? 'Scheduled';
+    final String cleanStatus = status.trim().toLowerCase();
+    final bool isPastStop = cleanStatus == 'completed' || cleanStatus == 'dropped' || cleanStatus.contains('show');
     final bool isOnBoard = status == 'Ongoing';
     final String address = isOnBoard ? (stop['drop_location'] ?? '') : (stop['pickup_location'] ?? '');
     final double? lat    = isOnBoard ? stop['drop_latitude']  : stop['pickup_latitude'];
@@ -1366,11 +1697,15 @@ class _RidesScreenState extends State<RidesScreen> {
     final bool escortBoarded = route['escort_boarded'] == true || route['escort_status'] == 'Boarded';
     final bool isEscortPending = hasEscort && !escortBoarded;
 
-    final bool showPickup = route['status'] == 'Ongoing' && status == 'Scheduled';
-    final bool showDrop   = route['status'] == 'Ongoing' && status == 'Ongoing';
+    final bool showPickup = false;
+    final bool showDrop   = false;
+    final logType = route['log_type'] ?? 'IN';
+    final config = DriverConfigService().config;
     final bool isOtpRequired = isOnBoard
-        ? stop['is_deboarding_otp_required'] == true
-        : stop['is_boarding_otp_required'] == true;
+        ? (stop['is_deboarding_otp_required'] == true &&
+            (logType == 'IN' ? config.loginDeboardingOtp : config.logoutDeboardingOtp))
+        : (stop['is_boarding_otp_required'] == true &&
+            (logType == 'IN' ? config.loginBoardingOtp : config.logoutBoardingOtp));
 
     final passengerName = stop['employee_name'] ?? 'Passenger';
     final initial = passengerName.isNotEmpty ? passengerName[0].toUpperCase() : 'P';
@@ -1421,133 +1756,156 @@ class _RidesScreenState extends State<RidesScreen> {
               ),
             ],
           ),
-          if (eta.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(color: _C.blueBg, borderRadius: BorderRadius.circular(6)),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.access_time_rounded, size: 10, color: _C.blue),
-                      const SizedBox(width: 4),
-                      Text('ETA: ${_formatTime(eta)}',
-                          style: GoogleFonts.poppins(
-                              fontSize: 10, color: _C.blue, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ),
-                if (isOtpRequired && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                        color: _C.amberBg,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: _C.amber.withValues(alpha: 0.3))),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.lock_rounded, size: 10, color: _C.amber),
-                        const SizedBox(width: 4),
-                        Text('OTP Required',
-                            style: GoogleFonts.poppins(
-                                fontSize: 9.5, color: _C.amber, fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-          if (address.isNotEmpty && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                  color: _C.bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _C.border)),
-              child: Row(
-                children: [
-                  const Icon(Icons.place_rounded, size: 13, color: _C.textSecondary),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(address,
-                        style: GoogleFonts.poppins(fontSize: 11.5, color: _C.textPrimary, fontWeight: FontWeight.w500)),
-                  ),
-                ],
-              ),
-            ),
-            if (lat != null && lng != null) ...[
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => _launchMaps(lat, lng, address),
-                  icon: const Icon(Icons.navigation_rounded, size: 14, color: Colors.white),
-                  label: Text('NAVIGATE TO ${isOnBoard ? "DROP" : "PICKUP"}',
-                      style: GoogleFonts.poppins(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _C.teal,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    elevation: 0,
-                  ),
-                ),
-              ),
-            ],
-            if (showPickup) ...[
+          if (!isPastStop) ...[
+            if (eta.isNotEmpty || isOtpRequired || stop['estimated_distance'] != null) ...[
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: isEscortPending ? () {
-                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please board the escort first!')));
-                      } : () => _handlePickup(stop, route, provider),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isEscortPending ? _C.border : _C.green,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
-                        padding: const EdgeInsets.symmetric(vertical: 9),
-                        elevation: 0,
+                  if (eta.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(color: _C.blueBg, borderRadius: BorderRadius.circular(6)),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.access_time_rounded, size: 10, color: _C.blue),
+                          const SizedBox(width: 4),
+                          Text('ETA: ${_formatTime(eta)}',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 10, color: _C.blue, fontWeight: FontWeight.bold)),
+                        ],
                       ),
-                      child: Text(isEscortPending ? 'BOARD ESCORT FIRST' : 'BOARD PASSENGER',
-                          style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: isEscortPending ? _C.textSecondary : Colors.white)),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: isEscortPending ? null : () => _handleNoShow(stop, route, provider),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _C.red,
-                        side: BorderSide(color: isEscortPending ? _C.border : _C.red.withValues(alpha: 0.4)),
-                        backgroundColor: isEscortPending ? _C.bg : _C.redBg,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
-                        padding: const EdgeInsets.symmetric(vertical: 9),
+                  if (isOtpRequired && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                          color: _C.amberBg,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: _C.amber.withValues(alpha: 0.3))),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lock_rounded, size: 10, color: _C.amber),
+                          const SizedBox(width: 4),
+                          Text('OTP Required',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 9.5, color: _C.amber, fontWeight: FontWeight.bold)),
+                        ],
                       ),
-                      child: Text('NO SHOW',
-                          style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: isEscortPending ? _C.border : _C.red)),
                     ),
-                  ),
+                  ],
+                  if (stop['estimated_distance'] != null) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: _C.bg,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: _C.border),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.map_rounded, size: 10, color: _C.textSecondary),
+                          const SizedBox(width: 4),
+                          Text('${stop['estimated_distance']} km',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 9.5, color: _C.textSecondary, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],
-            if (showDrop) ...[
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => _handleDrop(stop, route, provider),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _C.purple,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    elevation: 0,
-                  ),
-                  child: Text('DROP PASSENGER',
-                      style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+            if (address.isNotEmpty && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                    color: _C.bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _C.border)),
+                child: Row(
+                  children: [
+                    const Icon(Icons.place_rounded, size: 13, color: _C.textSecondary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(address,
+                          style: GoogleFonts.poppins(fontSize: 11.5, color: _C.textPrimary, fontWeight: FontWeight.w500)),
+                    ),
+                  ],
                 ),
               ),
+              if (lat != null && lng != null && _shouldShowNavigate(lat, lng, Provider.of<LocationProvider>(context))) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _launchMaps(lat, lng, address),
+                    icon: const Icon(Icons.navigation_rounded, size: 14, color: Colors.white),
+                    label: Text('NAVIGATE TO ${isOnBoard ? "DROP" : "PICKUP"}',
+                        style: GoogleFonts.poppins(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _C.teal,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      elevation: 0,
+                    ),
+                  ),
+                ),
+              ],
+              if (showPickup) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: isEscortPending ? () {
+                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please board the escort first!')));
+                        } : () => _handlePickup(stop, route, provider),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isEscortPending ? _C.border : _C.green,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                          padding: const EdgeInsets.symmetric(vertical: 9),
+                          elevation: 0,
+                        ),
+                        child: Text(isEscortPending ? 'BOARD ESCORT FIRST' : 'BOARD PASSENGER',
+                            style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: isEscortPending ? _C.textSecondary : Colors.white)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: isEscortPending ? null : () => _handleNoShow(stop, route, provider),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _C.red,
+                          side: BorderSide(color: isEscortPending ? _C.border : _C.red.withValues(alpha: 0.4)),
+                          backgroundColor: isEscortPending ? _C.bg : _C.redBg,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                          padding: const EdgeInsets.symmetric(vertical: 9),
+                        ),
+                        child: Text('NO SHOW',
+                            style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: isEscortPending ? _C.border : _C.red)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (showDrop) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => _handleDrop(stop, route, provider),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _C.purple,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      elevation: 0,
+                    ),
+                    child: Text('DROP PASSENGER',
+                        style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+                  ),
+                ),
+              ],
             ],
           ],
         ],
@@ -2092,9 +2450,14 @@ class _RidesScreenState extends State<RidesScreen> {
   }
 
   Future<void> _handlePickup(dynamic stop, dynamic route, BookingProvider provider) async {
+    final logType = route['log_type'] ?? 'IN';
+    final config = DriverConfigService().config;
+    final bool adminOtpEnabled = logType == 'IN' ? config.loginBoardingOtp : config.logoutBoardingOtp;
+    final bool needsOtp = adminOtpEnabled && stop['is_boarding_otp_required'] == true;
+
     String? otp;
-    if (stop['is_boarding_otp_required'] == true) {
-      otp = await _showOtpDialog(context, stop['employee_name']);
+    if (needsOtp) {
+      otp = await _showOtpDialog(context, stop['employee_name'] ?? 'Passenger');
       if (otp == null) return;
     }
     if (!mounted) return;
@@ -2112,9 +2475,14 @@ class _RidesScreenState extends State<RidesScreen> {
   }
 
   Future<void> _handleDrop(dynamic stop, dynamic route, BookingProvider provider) async {
+    final logType = route['log_type'] ?? 'IN';
+    final config = DriverConfigService().config;
+    final bool adminOtpEnabled = logType == 'IN' ? config.loginDeboardingOtp : config.logoutDeboardingOtp;
+    final bool needsOtp = adminOtpEnabled && stop['is_deboarding_otp_required'] == true;
+
     String? otp;
-    if (stop['is_deboarding_otp_required'] == true) {
-      otp = await _showOtpDialog(context, stop['employee_name']);
+    if (needsOtp) {
+      otp = await _showOtpDialog(context, stop['employee_name'] ?? 'Passenger');
       if (otp == null) return;
     }
     if (!mounted) return;
@@ -2453,6 +2821,24 @@ class _RidesScreenState extends State<RidesScreen> {
       barrierDismissible: false,
       builder: (c) => OtpDialogContent(employeeName: name),
     );
+  }
+
+  bool _shouldShowNavigate(double? targetLat, double? targetLng, LocationProvider locationProvider) {
+    if (targetLat == null || targetLng == null) return false;
+    final currentPos = locationProvider.lastPosition;
+    if (currentPos == null) {
+      debugPrint('📍 [Navigation Check] Device location not available yet. Showing navigate button.');
+      return true;
+    }
+    final double distance = Geolocator.distanceBetween(
+      currentPos.latitude,
+      currentPos.longitude,
+      targetLat,
+      targetLng,
+    );
+    final bool show = distance >= 100;
+    debugPrint('📍 [Navigation Check] Target: ($targetLat, $targetLng) | Device: (${currentPos.latitude}, ${currentPos.longitude}) | Distance: ${distance.toStringAsFixed(1)}m | Show Navigate? $show');
+    return show;
   }
 
   Future<void> _launchMaps(double lat, double lng, String? address) async {

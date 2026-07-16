@@ -23,6 +23,7 @@ class LocationProvider extends ChangeNotifier {
   double get currentSpeedKmh => _currentSpeedKmh;
   bool get isSpeedLimitExceeded => _isSpeedLimitExceeded;
   bool get hasGpsPermission => _hasGpsPermission;
+  Position? get lastPosition => _lastPosition;
 
   /// The effective speed limit from the last-fetched driver config.
   double get speedLimitKmh => _driverConfigService.config.speedLimitKmph;
@@ -30,6 +31,26 @@ class LocationProvider extends ChangeNotifier {
   bool get isTracking => _locationService.isTracking;
 
   LocationProvider() {
+    // Seed initial position from last known location
+    Geolocator.getLastKnownPosition().then((pos) {
+      if (pos != null && _lastPosition == null) {
+        _lastPosition = pos;
+        notifyListeners();
+      }
+    }).catchError((_) {});
+
+    // Fast fallback check
+    Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.low,
+      ),
+    ).then((pos) {
+      if (_lastPosition == null) {
+        _lastPosition = pos;
+        notifyListeners();
+      }
+    }).catchError((_) {});
+
     // Initialize the LocationRepository singleton so it subscribes to positionStream
     LocationRepository();
 

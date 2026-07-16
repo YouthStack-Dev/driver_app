@@ -30,6 +30,7 @@ class LocationForegroundService : Service() {
         const val TAG = "MLT_TrackingService"
         const val CHANNEL_ID = "mlt_tracking_channel"
         const val NOTIF_ID = 1001
+        const val NOTIF_ALERT_ID = 1002
         const val PREFS_NAME = "FlutterSharedPreferences"   // flutter shared_prefs namespace
         const val KEY_ROUTE_ID = "flutter.active_route_id"
         const val KEY_TOKEN = "flutter.bg_access_token"
@@ -96,6 +97,9 @@ class LocationForegroundService : Service() {
                 return START_NOT_STICKY
             }
             else -> {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(NOTIF_ALERT_ID)
+
                 val routeId = prefs.getString(KEY_ROUTE_ID, "") ?: ""
                 if (routeId.isEmpty()) {
                     Log.w(TAG, "No active_route_id — stopping service")
@@ -143,6 +147,9 @@ class LocationForegroundService : Service() {
             return
         }
 
+        // Show a high-priority heads-up/floating notification
+        showFloatingAlertNotification()
+
         val restartIntent = Intent(applicationContext, LocationForegroundService::class.java).apply {
             action = ACTION_START
         }
@@ -167,6 +174,46 @@ class LocationForegroundService : Service() {
             am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent)
         }
         Log.i(TAG, "Service restart scheduled in 1 second")
+    }
+
+    private fun showFloatingAlertNotification() {
+        val alertChannelId = "mlt_driver_alert_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                alertChannelId,
+                "MLT Driver Alerts",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "High priority alerts for active rides"
+                enableVibration(true)
+                setShowBadge(true)
+            }
+            val nm = getSystemService(NotificationManager::class.java)
+            nm?.createNotificationChannel(channel)
+        }
+
+        val openAppIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 2, openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, alertChannelId)
+            .setContentTitle("Ride Ongoing 🚖")
+            .setContentText("Your active trip is running. Tap to reopen the app.")
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setAutoCancel(true)
+            .build()
+
+        val nm = getSystemService(NotificationManager::class.java)
+        nm?.notify(NOTIF_ALERT_ID, notification)
     }
 
     override fun onDestroy() {
