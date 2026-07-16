@@ -9,6 +9,7 @@ import '../services/device_service.dart';
 import '../services/driver_config_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/background_tracking_service.dart';
+import '../services/api_client.dart';
 
 enum AuthStatus { unknown, unauthenticated, tempAuthenticated, authenticated }
 
@@ -55,6 +56,10 @@ class AuthProvider extends ChangeNotifier {
   /// and kicks off background services. Calls notifyListeners() exactly once
   /// at the very end to minimise UI rebuilds.
   Future<void> init() async {
+    // Register our full logout handler with ApiClient so automatic
+    // session-expiry logouts (401 → refresh fails) use the proper logout flow.
+    ApiClient().setLogoutCallback(logout);
+
     // Validate session integrity before trusting it
     final hasValid = await _sessionService.hasValidSession();
     if (!hasValid) {
@@ -125,11 +130,37 @@ class AuthProvider extends ChangeNotifier {
 
   /// Called when the app resumes from the background.
   /// Revalidates the session and proactively refreshes the access token if it's near expiry.
+  /// Uses a wider 60-minute threshold since the app could have been backgrounded for hours.
   Future<void> handleAppResume() async {
     debugPrint('📱 [AuthProvider] App resumed from background — checking session validity');
-    final hasValid = await _sessionService.hasValidSession();
-    if (!hasValid) return;
-    await _proactiveTokenRefresh();
+
+    // Only refresh if the driver is currently authenticated
+    if (_status != AuthStatus.authenticated) return;
+
+    // Always attempt a proactive refresh on resume with a wide threshold (60 min),
+    // since the app may have been in the background for hours.
+    try {
+      final needsRefresh = await _sessionService.shouldRefreshToken(thresholdMinutes: 60);
+      if (!needsRefresh) {
+        debugPrint('✅ [AuthProvider] Token still fresh — no refresh needed on resume');
+        return;
+      }
+      debugPrint('⏰ [AuthProvider] Token near/past expiry — refreshing on resume...');
+      final result = await _authService.refreshToken();
+      if (result['success'] == true) {
+        debugPrint('✅ [AuthProvider] Token refreshed successfully on resume');
+        await BackgroundTrackingService().syncSession();
+      } else {
+        debugPrint('⚠️ [AuthProvider] Resume refresh failed: ${result['error']} (${result['errorCode']})');
+        // If the refresh token itself is invalid, logout cleanly
+        if (result['errorCode'] == 'INVALID_REFRESH') {
+          debugPrint('🔒 [AuthProvider] Refresh token invalid — logging out');
+          await logout();
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ [AuthProvider] Resume refresh exception: $e');
+    }
   }
 
   // ── Unauthenticated fallback ───────────────────────────────────────────────

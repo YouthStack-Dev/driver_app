@@ -13,6 +13,17 @@ class ApiClient {
   static final ApiClient _instance = ApiClient._internal();
   late Dio _dio;
 
+  // Callback set by AuthProvider so ApiClient can trigger a full logout
+  // (stopping background services, clearing state, notifying listeners)
+  // instead of just clearing the session storage.
+  Future<void> Function()? _logoutCallback;
+  DateTime? _lastLogoutAttempt;
+
+  /// Register the full logout handler (called by AuthProvider at startup).
+  void setLogoutCallback(Future<void> Function() callback) {
+    _logoutCallback = callback;
+  }
+
   factory ApiClient() => _instance;
 
   ApiClient._internal() {
@@ -53,20 +64,26 @@ class ApiClient {
           if (needsRefresh) {
             debugPrint('⏰ [ApiClient] Silent proactive refresh triggered...');
             final result = await _refreshTokenOnce();
-            if (result?['errorCode'] == 'INVALID_REFRESH') {
+            final proactiveErrorCode = result?['errorCode'];
+
+            if (proactiveErrorCode == 'INVALID_REFRESH') {
               final bool isOngoingRide = LocationService().activeRouteId != null;
               if (isOngoingRide) {
                 debugPrint('🛡️ Active ride — suppressing logout on proactive refresh error.');
                 return handler.next(options);
               }
+              debugPrint('🔒 [ApiClient] Proactive refresh: INVALID_REFRESH — logging out');
               await _safeLogout();
               return handler.reject(
                 DioException(
                   requestOptions: options,
-                  error: 'Session expired',
+                  error: result?['error'] ?? 'Session expired',
                   type: DioExceptionType.badResponse,
                 ),
               );
+            } else if (proactiveErrorCode == 'SERVER_ERROR') {
+              // 500 REFRESH_FAILED — transient server issue, never logout
+              debugPrint('⚠️ [ApiClient] Proactive refresh hit server error — proceeding with current token');
             }
           }
         }
@@ -156,8 +173,9 @@ class ApiClient {
           final bool isOngoingRide = LocationService().activeRouteId != null;
 
           // Avoid infinite refresh loop: if the refresh endpoint itself 401s or 403s
+          // (e.g. INVALID_TOKEN, TOKEN_EXPIRED, DEVICE_NOT_AUTHORIZED etc.)
           if (e.requestOptions.path == ApiEndpoints.driverRefresh) {
-            debugPrint('🔒 Refresh token rejected by server ($status).');
+            debugPrint('🔒 Refresh endpoint returned $status — session is invalid.');
             // Refresh token is truly invalid — only safe time to logout
             await _safeLogout();
             return handler.next(e);
@@ -192,15 +210,23 @@ class ApiClient {
             }
           }
 
-          // Refresh failed — only logout if NOT on an active ride and it's not a network error
+          // Refresh failed — decide whether to logout based on error type
           final errorCode = refreshResult?['errorCode'];
           if (errorCode == 'NETWORK_ERROR' || errorCode == 'TIMEOUT') {
-            debugPrint('🌐 Refresh failed due to network error/timeout — keeping session intact');
+            debugPrint('🌐 Refresh failed due to network/timeout — keeping session intact');
+            return handler.next(e);
+          }
+          if (errorCode == 'SERVER_ERROR') {
+            // 500 REFRESH_FAILED per API docs — transient, never logout
+            debugPrint('⚠️ Refresh hit server error (REFRESH_FAILED) — keeping session intact');
             return handler.next(e);
           }
 
+          // INVALID_REFRESH — covers TOKEN_EXPIRED, INVALID_TOKEN, DRIVER_NOT_FOUND,
+          // DEVICE_NOT_AUTHORIZED, DEVICE_CONFLICT — all are hard session failures.
           if (isOngoingRide) {
-            debugPrint('🛡️ Active ride — suppressing logout after failed refresh.');
+            final reason = refreshResult?['error'] ?? 'unknown';
+            debugPrint('🛡️ Active ride — suppressing logout. Refresh reason: $reason');
           } else {
             await _safeLogout();
           }
@@ -252,7 +278,28 @@ class ApiClient {
   // deleteAll() would wipe FCM tokens, device IDs, and any future secure keys.
   // We only ever clear what SessionService owns.
   Future<void> _safeLogout() async {
+    // Cooldown guard: prevent repeated logout calls within 30 seconds
+    final now = DateTime.now();
+    if (_lastLogoutAttempt != null &&
+        now.difference(_lastLogoutAttempt!).inSeconds < 30) {
+      debugPrint('🔒 [ApiClient] Logout already triggered recently — skipping duplicate');
+      return;
+    }
+    _lastLogoutAttempt = now;
+
     debugPrint('🔒 Session invalid — logging out safely');
+
+    // Prefer full logout via AuthProvider (stops bg services + notifies UI)
+    if (_logoutCallback != null) {
+      try {
+        await _logoutCallback!();
+        return;
+      } catch (e) {
+        debugPrint('⚠️ [ApiClient] Full logout callback failed: $e — falling back to session clear');
+      }
+    }
+
+    // Fallback: just clear session + navigate (no provider callback registered)
     await SessionService().clearSession();
     // Navigate to login — ApiClient delegates navigation via NavigationService
     // so the UI layer remains in control.

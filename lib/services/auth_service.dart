@@ -120,6 +120,8 @@ class AuthService {
       final accessToken = data['access_token'] ?? data['token'];
 
       if (accessToken != null) {
+        final expiresIn = data['expires_in'] as int?; // e.g. 900 (seconds)
+
         // Fix: Always prioritize the existing full list of accounts.
         // The selectTenant API might return a partial list (just the active one) or none.
         // We trust the session (populated by verifyDevice) as the master list.
@@ -161,6 +163,7 @@ class AuthService {
           accessToken: accessToken,
           refreshToken: data['refresh_token'],
           userData: finalUserData,
+          expiresIn: expiresIn, // server-provided TTL (authoritative)
         );
         
         await _sessionService.clearTempSession();
@@ -206,10 +209,11 @@ class AuthService {
       final refreshToken = session?['refresh_token'];
       
       if (refreshToken == null) {
+        debugPrint('⚠️ AuthService: No refresh token in session — treating as invalid session');
         return {
           'success': false, 
           'error': 'No refresh token available',
-          'errorCode': 'EXPIRED_REFRESH_TOKEN'
+          'errorCode': 'INVALID_REFRESH'
         };
       }
 
@@ -222,8 +226,9 @@ class AuthService {
       _logger.i('🔄 Refresh Response Body: ${response.data}');
       final data = response.data['data'] ?? {};
       final newAccessToken = data['access_token'] ?? data['token'];
-      final newRefreshToken = data['refresh_token']; // Might be rotated
-      _logger.i('🔑 New Access Token generated: ${newAccessToken != null ? "...${newAccessToken.substring(newAccessToken.length > 10 ? newAccessToken.length - 10 : 0)}" : "null"}');
+      final newRefreshToken = data['refresh_token']; // Same token (no rotation per API docs)
+      final expiresIn      = data['expires_in'] as int?; // 900 s per API docs
+      _logger.i('🔑 New Access Token: ...${newAccessToken != null && newAccessToken.length > 10 ? newAccessToken.substring(newAccessToken.length - 10) : "null"} | expires_in=${expiresIn}s');
 
       if (newAccessToken != null) {
          Map<String, dynamic> refreshedUser = (data['user_data'] ??
@@ -244,8 +249,9 @@ class AuthService {
 
          await _sessionService.setSession(
            accessToken: newAccessToken,
-           refreshToken: newRefreshToken ?? refreshToken, // Update if new one provided
+           refreshToken: newRefreshToken ?? refreshToken, // Same token (no rotation)
            userData: refreshedUser,
+           expiresIn: expiresIn, // authoritative TTL from server
          );
          
          // Trigger BackgroundTrackingService().syncSession() immediately after a successful token refresh
@@ -272,14 +278,14 @@ class AuthService {
   }
 
   Map<String, dynamic> _handleError(DioException e) {
-    String error = 'Server error';
+    String error     = 'Server error';
     String errorCode = 'UNKNOWN';
 
     final isTimeout = e.type == DioExceptionType.connectionTimeout ||
         e.type == DioExceptionType.receiveTimeout ||
         e.type == DioExceptionType.sendTimeout;
     final isNetwork = e.type == DioExceptionType.connectionError;
-    final status = e.response?.statusCode;
+    final status    = e.response?.statusCode;
 
     if (isTimeout) {
       errorCode = 'TIMEOUT';
@@ -288,34 +294,73 @@ class AuthService {
       errorCode = 'NETWORK_ERROR';
       error = 'Network connection error';
     } else if (status != null) {
-      if (status == 400 || status == 401 || status == 403) {
+      if (status == 401 || status == 403) {
         errorCode = 'INVALID_REFRESH';
         error = 'Session expired';
+      } else if (status == 400) {
+        errorCode = 'INVALID_REFRESH';
+        error = 'Bad refresh request';
       } else if (status >= 500) {
         errorCode = 'SERVER_ERROR';
         error = 'Server error ($status)';
       }
     }
 
+    // ── Parse server error_code from response body ────────────────────────────
+    // The refresh endpoint returns structured errors:
+    // { "detail": { "error_code": "TOKEN_EXPIRED", "message": "..." } }
+    // or { "error_code": "...", "message": "..." }
     if (e.response?.data != null) {
       final data = e.response?.data;
       if (data is Map) {
-         // Handle nested detail object (common in 403/401)
-         if (data['detail'] is Map) {
-            final detail = data['detail'];
-            error = detail['message'] ?? detail['error'] ?? error;
-            if (detail['error_code'] != null) {
-              error += ' (${detail['error_code']})';
-              errorCode = detail['error_code'].toString();
-            }
-         } else {
-            error = data['detail'] ?? 
-                   data['message'] ?? 
-                   data['error'] ?? 
-                   error;
-         }
+        String? serverCode;
+        String? serverMessage;
+
+        if (data['detail'] is Map) {
+          final detail = data['detail'] as Map;
+          serverCode    = detail['error_code']?.toString();
+          serverMessage = detail['message']?.toString() ?? detail['error']?.toString();
+        } else {
+          serverCode    = data['error_code']?.toString() ?? data['code']?.toString();
+          serverMessage = data['detail']?.toString() ??
+                          data['message']?.toString() ??
+                          data['error']?.toString();
+        }
+
+        // Map server-defined error codes (from API docs) to client error codes
+        if (serverCode != null) {
+          switch (serverCode) {
+            case 'TOKEN_EXPIRED':
+              errorCode = 'INVALID_REFRESH'; // 15-day refresh token expired → re-login
+              error = serverMessage ?? 'Refresh token expired — please log in again';
+            case 'INVALID_TOKEN':
+              errorCode = 'INVALID_REFRESH'; // Malformed / bad signature
+              error = serverMessage ?? 'Invalid refresh token';
+            case 'DRIVER_NOT_FOUND':
+              errorCode = 'INVALID_REFRESH'; // Driver deleted after token issuance
+              error = serverMessage ?? 'Driver account not found';
+            case 'DEVICE_NOT_AUTHORIZED':
+              // Admin deactivated this device — security event, must re-login
+              errorCode = 'INVALID_REFRESH';
+              error = serverMessage ?? 'This device is no longer authorized';
+            case 'DEVICE_CONFLICT':
+              // Another driver is using the same device — security event
+              errorCode = 'INVALID_REFRESH';
+              error = serverMessage ?? 'Device conflict — please contact support';
+            case 'REFRESH_FAILED':
+              // Server-side unexpected error — do NOT logout
+              errorCode = 'SERVER_ERROR';
+              error = serverMessage ?? 'Temporary server error — please try again';
+            default:
+              if (serverMessage != null) error = serverMessage;
+          }
+          _logger.w('⚠️ AuthService: Server error_code=$serverCode → client errorCode=$errorCode');
+        } else if (serverMessage != null) {
+          error = serverMessage;
+        }
       }
     }
+
     return {'success': false, 'error': error, 'errorCode': errorCode};
   }
 

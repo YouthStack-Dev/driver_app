@@ -49,17 +49,38 @@ class SessionService {
   /// Save final authenticated session to secure storage.
   /// Also mirrors the access token into SharedPreferences so the Kotlin
   /// background service can read it without FlutterSecureStorage access.
+  ///
+  /// [expiresIn] — TTL in seconds from the server's `expires_in` field (e.g. 900).
+  /// When provided it is used instead of parsing the JWT `exp` claim, which is
+  /// more reliable and works even when the JWT carries no `exp`.
   Future<void> setSession({
     required String accessToken,
     required Map<String, dynamic> userData,
     String? refreshToken,
+    int? expiresIn, // e.g. 900 from server response
   }) async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+
+    // Priority: server-provided TTL > JWT exp claim
+    final expiresAt = expiresIn != null
+        ? nowMs + (expiresIn * 1000)
+        : _extractExpiry(accessToken);
+
+    if (expiresAt != null) {
+      debugPrint(
+        '⏰ SessionService: Token will expire at '
+        '${DateTime.fromMillisecondsSinceEpoch(expiresAt)} '
+        '(${expiresIn != null ? "server TTL ${expiresIn}s" : "JWT exp claim"})');
+    } else {
+      debugPrint('⚠️ SessionService: Could not determine token expiry — refresh will fall back to login_time');
+    }
+
     final session = {
       'access_token':  accessToken,
       'refresh_token': refreshToken,
       'user_data':     userData,
-      'expiresAt':     _extractExpiry(accessToken),
-      'login_time':    DateTime.now().millisecondsSinceEpoch,
+      'expiresAt':     expiresAt,
+      'login_time':    nowMs,
     };
 
     await _storage.write(key: sessionKey, value: jsonEncode(session));
@@ -197,12 +218,30 @@ class SessionService {
 
   /// Returns true if the access token has expired or will expire within
   /// [thresholdMinutes] minutes (default 10 min).
-  /// Returns false if expiry cannot be determined (safe assumption = still valid).
+  /// Falls back to login_time if the JWT has no 'exp' claim.
   Future<bool> shouldRefreshToken({int thresholdMinutes = 10}) async {
     try {
       final session   = await getSession();
       final expiresAt = session?['expiresAt'] as int?;
-      if (expiresAt == null) return false; // Can't determine — assume OK
+
+      if (expiresAt == null) {
+        // No exp claim in JWT — fall back to login_time.
+        // Assume a 1-hour access token lifetime (common default).
+        // If the session is older than (60 - threshold) minutes, refresh.
+        final loginTime = session?['login_time'] as int?;
+        if (loginTime == null) return false; // Can't determine — assume OK
+
+        // Access token TTL is 900 s (15 min) per API docs.
+        // Treat any session older than (15 - threshold) minutes as needing refresh.
+        const assumedLifetimeMinutes = 15; // Matches server DRIVER_ACCESS_TOKEN_TTL=900s
+        final ageMinutes = (DateTime.now().millisecondsSinceEpoch - loginTime) ~/ 60000;
+        final needsRefresh = ageMinutes >= (assumedLifetimeMinutes - thresholdMinutes);
+        if (needsRefresh) {
+          debugPrint(
+            '⏰ SessionService: No exp claim — session age ${ageMinutes}m >= ${assumedLifetimeMinutes - thresholdMinutes}m threshold — refresh needed');
+        }
+        return needsRefresh;
+      }
 
       final nowMs       = DateTime.now().millisecondsSinceEpoch;
       final thresholdMs = thresholdMinutes * 60 * 1000;
