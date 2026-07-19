@@ -10,7 +10,6 @@ import '../services/permission_service.dart';
 import '../widgets/app_drawer.dart';
 import '../services/driver_config_service.dart';
 import '../services/session_service.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'chat_screen.dart';
 // ─── Light Theme Color Tokens ────────────────────────────────────────────────
@@ -394,7 +393,7 @@ class _RidesScreenState extends State<RidesScreen> {
   // ─── Route Card ─────────────────────────────────────────────────────────────
 
   Widget _buildRouteCard(dynamic route, BookingProvider provider) {
-    final locationProvider = Provider.of<LocationProvider>(context);
+
     final bool isOngoing  = route['status'] == 'Ongoing';
     final bool isAssigned = route['status'] == 'Driver Assigned';
     final stops     = route['stops'] as List? ?? [];
@@ -606,9 +605,8 @@ class _RidesScreenState extends State<RidesScreen> {
 
             // ── Escort Gate: block stops until escort is boarded ──────────
             if (showEscortBoard)
-              _buildEscortGate(route, provider)
-            // ── Passenger Stops (shown only after escort is boarded) ──────
-            else if (stops.isNotEmpty)
+              _buildEscortGate(route, provider),
+            if (stops.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: Column(
@@ -635,8 +633,7 @@ class _RidesScreenState extends State<RidesScreen> {
                               final double? officeLat = firstStop['pickup_latitude'];
                               final double? officeLng = firstStop['pickup_longitude'];
                               final String officeAddress = firstStop['pickup_location'] ?? 'Office';
-                              final bool showNav = _shouldShowNavigate(officeLat, officeLng, locationProvider);
-                              if (officeLat != null && officeLng != null && showNav) {
+                              if (officeLat != null && officeLng != null) {
                                 return Padding(
                                   padding: const EdgeInsets.only(bottom: 12),
                                   child: Container(
@@ -645,45 +642,31 @@ class _RidesScreenState extends State<RidesScreen> {
                                       borderRadius: BorderRadius.circular(14),
                                       border: Border.all(color: _C.border),
                                     ),
-                                    padding: const EdgeInsets.all(12),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    child: Row(
                                       children: [
-                                        Row(
-                                          children: [
-                                            const Icon(Icons.location_on_rounded, color: _C.blue, size: 20),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text('Pickup Location (Office)',
-                                                      style: GoogleFonts.poppins(
-                                                          fontWeight: FontWeight.bold, fontSize: 13, color: _C.textPrimary)),
-                                                  Text(officeAddress,
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                      style: GoogleFonts.poppins(fontSize: 11, color: _C.textSecondary)),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
+                                        const Icon(Icons.location_on_rounded, color: _C.blue, size: 20),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text('Pickup Location (Office)',
+                                                  style: GoogleFonts.poppins(
+                                                      fontWeight: FontWeight.bold, fontSize: 13, color: _C.textPrimary)),
+                                              Text(officeAddress,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: GoogleFonts.poppins(fontSize: 11, color: _C.textSecondary)),
+                                            ],
+                                          ),
                                         ),
-                                        const SizedBox(height: 10),
-                                        ElevatedButton.icon(
-                                          onPressed: () => _launchMaps(officeLat, officeLng, officeAddress),
-                                          icon: const Icon(Icons.navigation_rounded, size: 15, color: Colors.white),
-                                          label: Text(
-                                            'Navigate to Pickup Point',
-                                            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
-                                          ),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: _C.blue,
-                                            foregroundColor: Colors.white,
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                            padding: const EdgeInsets.symmetric(vertical: 11),
-                                            elevation: 0,
-                                          ),
+                                        const SizedBox(width: 8),
+                                        _iconAction(
+                                          icon: Icons.directions_rounded,
+                                          color: _C.teal,
+                                          bg: _C.tealBg,
+                                          onTap: () => _openExternalMap(officeLat, officeLng, officeAddress),
                                         ),
                                       ],
                                     ),
@@ -1016,7 +999,7 @@ class _RidesScreenState extends State<RidesScreen> {
     final address = stop['pickup_location'] ?? '';
     return TextButton.icon(
       onPressed: () {
-        if (lat != null && lng != null) _launchMaps(lat, lng, address);
+        if (lat != null && lng != null) _openExternalMap(lat, lng, address);
       },
       icon: const Icon(Icons.map_outlined, size: 14, color: _C.blue),
       label: Text('View Map', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: _C.blue)),
@@ -1217,42 +1200,27 @@ class _RidesScreenState extends State<RidesScreen> {
                     ),
                     const SizedBox(height: 4),
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 1),
-                          child: Icon(Icons.location_on_rounded, size: 14, color: _C.blue),
-                        ),
+                        const Icon(Icons.location_on_rounded, size: 14, color: _C.blue),
                         const SizedBox(width: 5),
                         Expanded(
                           child: Text(address,
                               style: GoogleFonts.poppins(
                                   fontSize: 12.5, color: _C.textPrimary, fontWeight: FontWeight.w500)),
                         ),
+                        if (lat != null && lng != null) ...[
+                          const SizedBox(width: 8),
+                          _iconAction(
+                            icon: Icons.directions_rounded,
+                            color: _C.teal,
+                            bg: _C.tealBg,
+                            onTap: () => _openExternalMap(lat, lng, address),
+                          ),
+                        ],
                       ],
                     ),
                   ],
-                ),
-              ),
-            ),
-
-          // Navigate button
-          if (lat != null && lng != null && _shouldShowNavigate(lat, lng, Provider.of<LocationProvider>(context)))
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-              child: ElevatedButton.icon(
-                onPressed: () => _launchMaps(lat, lng, address),
-                icon: const Icon(Icons.navigation_rounded, size: 15, color: Colors.white),
-                label: Text(
-                  'Navigate to ${isOnBoard ? "Drop" : "Pickup"}',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _C.blue,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  padding: const EdgeInsets.symmetric(vertical: 11),
-                  elevation: 0,
                 ),
               ),
             ),
@@ -1508,8 +1476,8 @@ class _RidesScreenState extends State<RidesScreen> {
     final config = DriverConfigService().config;
     final bool isOtpRequired = stop['is_boarding_otp_required'] == true && config.logoutBoardingOtp;
 
-    final double? lat = stop['pickup_latitude'];
-    final double? lng = stop['pickup_longitude'];
+    final double? lat = isBoarded ? stop['drop_latitude'] : stop['pickup_latitude'];
+    final double? lng = isBoarded ? stop['drop_longitude'] : stop['pickup_longitude'];
 
     return Container(
       decoration: BoxDecoration(
@@ -1559,10 +1527,25 @@ class _RidesScreenState extends State<RidesScreen> {
                             fontWeight: FontWeight.bold, fontSize: 13.5, color: _C.textPrimary)),
                     if (address.isNotEmpty) ...[
                       const SizedBox(height: 2),
-                      Text(address,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(fontSize: 11, color: _C.textSecondary)),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(address,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(fontSize: 11, color: _C.textSecondary)),
+                          ),
+                          if (lat != null && lng != null) ...[
+                            const SizedBox(width: 6),
+                            _iconAction(
+                              icon: Icons.directions_rounded,
+                              color: _C.teal,
+                              bg: _C.tealBg,
+                              onTap: () => _openExternalMap(lat, lng, address),
+                            ),
+                          ],
+                        ],
+                      ),
                     ],
                   ],
                 ),
@@ -1831,27 +1814,18 @@ class _RidesScreenState extends State<RidesScreen> {
                       child: Text(address,
                           style: GoogleFonts.poppins(fontSize: 11.5, color: _C.textPrimary, fontWeight: FontWeight.w500)),
                     ),
+                    if (lat != null && lng != null) ...[
+                      const SizedBox(width: 8),
+                      _iconAction(
+                        icon: Icons.directions_rounded,
+                        color: _C.teal,
+                        bg: _C.tealBg,
+                        onTap: () => _openExternalMap(lat, lng, address),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              if (lat != null && lng != null && _shouldShowNavigate(lat, lng, Provider.of<LocationProvider>(context))) ...[
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () => _launchMaps(lat, lng, address),
-                    icon: const Icon(Icons.navigation_rounded, size: 14, color: Colors.white),
-                    label: Text('NAVIGATE TO ${isOnBoard ? "DROP" : "PICKUP"}',
-                        style: GoogleFonts.poppins(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _C.teal,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      elevation: 0,
-                    ),
-                  ),
-                ),
-              ],
               if (showPickup) ...[
                 const SizedBox(height: 8),
                 Row(
@@ -2823,47 +2797,7 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  bool _shouldShowNavigate(double? targetLat, double? targetLng, LocationProvider locationProvider) {
-    if (targetLat == null || targetLng == null) return false;
-    final currentPos = locationProvider.lastPosition;
-    if (currentPos == null) {
-      debugPrint('📍 [Navigation Check] Device location not available yet. Showing navigate button.');
-      return true;
-    }
-    final double distance = Geolocator.distanceBetween(
-      currentPos.latitude,
-      currentPos.longitude,
-      targetLat,
-      targetLng,
-    );
-    final bool show = distance >= 100;
-    debugPrint('📍 [Navigation Check] Target: ($targetLat, $targetLng) | Device: (${currentPos.latitude}, ${currentPos.longitude}) | Distance: ${distance.toStringAsFixed(1)}m | Show Navigate? $show');
-    return show;
-  }
 
-  Future<void> _launchMaps(double lat, double lng, String? address) async {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Open Navigation', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: Text('Navigate to:\n${address ?? "Unknown Location"}', style: GoogleFonts.poppins(fontSize: 13.5)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Cancel', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _openExternalMap(lat, lng, address);
-            },
-            child: Text('Open Maps', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.blue)),
-          ),
-        ],
-      ),
-    );
-  }
 
   Future<void> _openExternalMap(double lat, double lng, String? address) async {
     final Uri directionsUrl = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
