@@ -8,7 +8,6 @@ import 'services/firebase_service.dart';
 import 'services/permission_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
-import 'screens/rides_screen.dart';
 import 'screens/schedules_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/switch_account_screen.dart';
@@ -195,6 +194,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       builder: (context, auth, _) {
         switch (auth.status) {
           case AuthStatus.unknown:
+          case AuthStatus.restoring:
             return const Scaffold(
               backgroundColor: Color(0xFFF4F6FA),
               body: Center(
@@ -205,6 +205,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
               ),
             );
           case AuthStatus.authenticated:
+          case AuthStatus.offlineAuthenticated:
             return const HomeScreen();
           case AuthStatus.tempAuthenticated:
             final licenseNumber = auth.currentUser?['driver']?['license_number'] ?? 
@@ -212,6 +213,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
                                   auth.currentUser?['license_number'] ??
                                   auth.driver?['license_number'] ?? 'LC123456';
             return VendorSelectScreen(licenseNumber: licenseNumber);
+          case AuthStatus.authenticationError:
           case AuthStatus.unauthenticated:
             return const LoginScreen();
         }

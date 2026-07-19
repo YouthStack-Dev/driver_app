@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'native_auth_bridge.dart';
 
 class SessionService {
   static const String sessionKey       = 'user_session';
@@ -47,8 +48,8 @@ class SessionService {
   }
 
   /// Save final authenticated session to secure storage.
-  /// Also mirrors the access token into SharedPreferences so the Kotlin
-  /// background service can read it without FlutterSecureStorage access.
+  /// Also mirrors the access token into SharedPreferences and native encrypted
+  /// storage so the Kotlin background service can read it.
   ///
   /// [expiresIn] — TTL in seconds from the server's `expires_in` field (e.g. 900).
   /// When provided it is used instead of parsing the JWT `exp` claim, which is
@@ -112,6 +113,17 @@ class SessionService {
       tenantId: tenantId,
       vendorId: vendorId,
     );
+
+    // Mirror to native encrypted storage
+    final bridge = NativeAuthBridge();
+    await bridge.saveTokens({
+      'access_token': accessToken,
+      'refresh_token': refreshToken,
+      'access_token_expires_at': expiresAt,
+      'driver_id': driverId.isNotEmpty ? driverId : null,
+      'tenant_id': tenantId.isNotEmpty ? tenantId : null,
+    });
+    await bridge.setAuthState('AUTHENTICATED');
   }
 
   /// Save temporary session (pre-confirmation / vendor selection stage)
@@ -315,6 +327,72 @@ class SessionService {
     return prefs.getBool(_trackingEnabledKey) ?? false;
   }
 
+  // ── Native token synchronization ──────────────────────────────────────────
+
+  Future<void> syncBackgroundSessionFromCurrent() async {
+    final session = await getSession();
+    if (session == null) return;
+
+    final accessToken = session['access_token'] as String?;
+    if (accessToken == null) return;
+
+    final userData = session['user_data'] as Map<String, dynamic>?;
+    final driverId = userData != null ? _extractDriverId(userData)?.toString() : '';
+    final tenantId = userData != null ? _extractTenantId(userData)?.toString() : '';
+    final vendorId = userData != null ? _extractVendorId(userData)?.toString() : '';
+    final refreshToken = session['refresh_token'] as String?;
+
+    await syncBackgroundSession(
+      token: accessToken,
+      driverId: driverId ?? '',
+      tenantId: tenantId ?? '',
+      vendorId: vendorId ?? '',
+    );
+
+    final bridge = NativeAuthBridge();
+    await bridge.saveTokens({
+      'access_token': accessToken,
+      'refresh_token': refreshToken,
+      'access_token_expires_at': session['expiresAt'] as int?,
+      'driver_id': driverId,
+      'tenant_id': tenantId,
+    });
+    await bridge.setAuthState('AUTHENTICATED');
+  }
+
+  Future<void> importNativeTokenSet(Map<String, dynamic> nativeTokens) async {
+    final accessToken = nativeTokens['access_token'] as String?;
+    if (accessToken == null || accessToken.isEmpty) return;
+
+    final session = await getSession();
+    final userData = session?['user_data'];
+
+    final expiresAt = nativeTokens['access_token_expires_at'] as int?;
+    final refreshToken = nativeTokens['refresh_token'] as String?;
+
+    await setSession(
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+      userData: userData ?? {},
+      expiresIn: expiresAt != null
+          ? ((expiresAt - DateTime.now().millisecondsSinceEpoch) ~/ 1000).clamp(60, 86400)
+          : null,
+    );
+
+    final driverId = nativeTokens['driver_id'] as String?;
+    final tenantId = nativeTokens['tenant_id'] as String?;
+    if (driverId != null || tenantId != null) {
+      await NativeAuthBridge().setDriverMetadata(
+        driverId: driverId,
+        tenantId: tenantId,
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>?> getNativeTokens() async {
+    return NativeAuthBridge().importNativeTokens();
+  }
+
   // ── Clear ──────────────────────────────────────────────────────────────────
 
   Future<void> clearSession() async {
@@ -335,6 +413,10 @@ class SessionService {
     await prefs.remove('driver_id');
     await prefs.remove('tenant_id');
     await prefs.remove('vendor_id');
+
+    // Clear native encrypted tokens
+    await NativeAuthBridge().clearTokens();
+    await NativeAuthBridge().setAuthState('REQUIRES_LOGIN');
   }
 
   Future<void> clearTempSession() async {

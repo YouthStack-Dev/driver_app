@@ -30,7 +30,9 @@ class NetworkReceiver : BroadcastReceiver() {
             LocationForegroundService.PREFS_NAME, Context.MODE_PRIVATE
         )
         val routeId = prefs.getString(LocationForegroundService.KEY_ROUTE_ID, "") ?: ""
-        val token = prefs.getString(LocationForegroundService.KEY_TOKEN, "") ?: ""
+
+        val tokenRepository = DriverTokenRepository.getInstance(context)
+        val hasToken = tokenRepository.hasTokens() && tokenRepository.getAuthenticationState() == DriverTokenRepository.AuthenticationState.AUTHENTICATED
 
         // 3. Verify location permission
         val hasGpsPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -40,7 +42,7 @@ class NetworkReceiver : BroadcastReceiver() {
         }
 
         // 2. Ensure Route ID, Token, and Permission are present before starting
-        if (routeId.isNotEmpty() && token.isNotEmpty() && hasGpsPermission) {
+        if (routeId.isNotEmpty() && hasToken && hasGpsPermission) {
             Log.i(TAG, "Active route ($routeId), token, and permissions found — restarting tracking service")
             val serviceIntent = Intent(context, LocationForegroundService::class.java).apply {
                 action = LocationForegroundService.ACTION_START
@@ -51,7 +53,7 @@ class NetworkReceiver : BroadcastReceiver() {
                 context.startService(serviceIntent)
             }
         } else {
-            Log.i(TAG, "Checks failed for restart: route=$routeId, token=${token.isNotEmpty()}, permission=$hasGpsPermission — service not started")
+            Log.i(TAG, "Checks failed for restart: route=$routeId, hasToken=$hasToken, permission=$hasGpsPermission — service not started")
         }
     }
 

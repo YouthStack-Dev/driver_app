@@ -5,9 +5,10 @@ import 'package:flutter/foundation.dart';
 import '../services/navigation_service.dart';
 import 'package:dio/io.dart';
 import '../config/constants.dart';
-import 'auth_service.dart';
 import 'session_service.dart';
 import 'location_service.dart';
+import 'flutter_refresh_coordinator.dart';
+import 'native_auth_bridge.dart';
 
 class ApiClient {
   static final ApiClient _instance = ApiClient._internal();
@@ -192,11 +193,33 @@ class ApiClient {
           // (e.g. INVALID_TOKEN, TOKEN_EXPIRED, DEVICE_NOT_AUTHORIZED etc.)
           // Also skip for logout — we're already logging out, no point retrying.
           if (e.requestOptions.path == ApiEndpoints.driverRefresh) {
-            debugPrint('🔒 Refresh endpoint returned $status — session is invalid.');
+            debugPrint('🔒 Refresh endpoint returned $status — checking native tokens');
+
+            // Check if native side has a newer refresh token
+            final nativeTokens = await NativeAuthBridge().importNativeTokens();
+            if (nativeTokens != null) {
+              final nativeRefreshToken = nativeTokens['refresh_token'] as String?;
+              final session = await SessionService().getSession();
+              final flutterRefreshToken = session?['refresh_token'] as String?;
+              if (nativeRefreshToken != null && nativeRefreshToken != flutterRefreshToken) {
+                debugPrint('🔒 Native has different refresh token — importing before deciding logout');
+                await SessionService().importNativeTokenSet(nativeTokens);
+
+                final retryResult = await _refreshTokenOnce();
+                if (retryResult?['success'] == true) {
+                  final opts = e.requestOptions;
+                  opts.headers['Authorization'] = 'Bearer ${retryResult?['access_token']}';
+                  try {
+                    final retryResponse = await _dio.fetch(opts);
+                    return handler.resolve(retryResponse);
+                  } catch (_) {}
+                }
+              }
+            }
+
             if (isOngoingRide) {
               debugPrint('🛡️ Active ride — suppressing logout on refresh-endpoint $status.');
             } else {
-              // Refresh token is truly invalid — only safe time to logout
               await _safeLogout();
             }
             return handler.next(e);
@@ -263,17 +286,27 @@ class ApiClient {
   }
 
   // ── Refresh token wrapper ──────────────────────────────────────────────────
-  // Calls the single-coordination refreshToken() in AuthService.
+  // Delegates to FlutterRefreshCoordinator which provides single-flight
+  // deduplication and proper error classification.
   Future<Map<String, dynamic>?> _refreshTokenOnce() async {
     try {
       debugPrint('🔄 [ApiClient] Initiating silent token refresh call...');
-      final result = await AuthService().refreshToken();
-      if (result['success'] == true) {
-        debugPrint('✅ [ApiClient] Token refreshed successfully');
-      } else {
-        debugPrint('⚠️ [ApiClient] Refresh failed: ${result['error']}');
+      final outcome = await FlutterRefreshCoordinator().refreshIfNeeded(force: true);
+      switch (outcome) {
+        case RefreshOutcome.success:
+          final session = await SessionService().getSession();
+          final newToken = session?['access_token'] as String?;
+          debugPrint('✅ [ApiClient] Token refreshed successfully');
+          return {'success': true, 'access_token': newToken};
+        case RefreshOutcome.notNeeded:
+          final session = await SessionService().getSession();
+          final newToken = session?['access_token'] as String?;
+          return {'success': true, 'access_token': newToken};
+        case RefreshOutcome.permanentFailure:
+          return {'success': false, 'error': 'Session expired', 'errorCode': 'INVALID_REFRESH'};
+        case RefreshOutcome.temporaryFailure:
+          return {'success': false, 'error': 'Temporary error', 'errorCode': 'SERVER_ERROR'};
       }
-      return result;
     } catch (e) {
       debugPrint('❌ Refresh exception: $e');
       String errorCode = 'UNKNOWN';

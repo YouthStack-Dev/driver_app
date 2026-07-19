@@ -10,13 +10,25 @@ import '../services/driver_config_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/background_tracking_service.dart';
 import '../services/api_client.dart';
+import '../services/native_auth_bridge.dart';
+import '../services/flutter_refresh_coordinator.dart';
 
-enum AuthStatus { unknown, unauthenticated, tempAuthenticated, authenticated }
+enum AuthStatus {
+  unknown,
+  restoring,
+  authenticated,
+  offlineAuthenticated,
+  tempAuthenticated,
+  authenticationError,
+  unauthenticated,
+}
 
 class AuthProvider extends ChangeNotifier {
   final AuthService    _authService    = AuthService();
   final SessionService _sessionService = SessionService();
   final DeviceService  _deviceService  = DeviceService();
+  final NativeAuthBridge _nativeAuth  = NativeAuthBridge();
+  final FlutterRefreshCoordinator _refreshCoord = FlutterRefreshCoordinator();
 
   AuthStatus _status = AuthStatus.unknown;
   AuthStatus get status => _status;
@@ -24,14 +36,14 @@ class AuthProvider extends ChangeNotifier {
   Map<String, dynamic>? _currentUser;
   Map<String, dynamic>? get currentUser => _currentUser;
 
-  // Temp session data
   List<dynamic> _accounts = [];
   Map<String, dynamic>? _driver;
   List<dynamic> get vendors  => _accounts;
   List<dynamic> get accounts => _accounts;
   Map<String, dynamic>? get driver => _driver;
 
-  // ── ID getters ─────────────────────────────────────────────────────────────
+  String? _startupError;
+  String? get startupError => _startupError;
 
   String get tenantId {
     if (_currentUser == null) return 'N/A';
@@ -51,19 +63,16 @@ class AuthProvider extends ChangeNotifier {
     return val?.toString() ?? 'N/A';
   }
 
-  // ── init() ─────────────────────────────────────────────────────────────────
-  /// Called once at app startup. Restores session, refreshes token if needed,
-  /// and kicks off background services. Calls notifyListeners() exactly once
-  /// at the very end to minimise UI rebuilds.
   Future<void> init() async {
-    // Register our full logout handler with ApiClient so automatic
-    // session-expiry logouts (401 → refresh fails) use the proper logout flow.
+    _status = AuthStatus.restoring;
     ApiClient().setLogoutCallback(logout);
 
-    // Validate session integrity before trusting it
+    // Step 1: Import native tokens if they exist and are newer
+    await _importNativeTokensIfNewer();
+
+    // Step 2: Validate session integrity
     final hasValid = await _sessionService.hasValidSession();
     if (!hasValid) {
-      // No valid session — fall back to temp or unauthenticated
       await _resolveUnauthenticated();
       notifyListeners();
       return;
@@ -76,7 +85,6 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
 
-    // Restore user data
     _currentUser = session['user_data'];
     if (_currentUser != null) {
       _accounts = _currentUser!['accounts'] is List
@@ -84,91 +92,136 @@ class AuthProvider extends ChangeNotifier {
           : [];
       _driver = _currentUser!['driver'] ?? _currentUser!['user']?['driver'];
     }
-    _status = AuthStatus.authenticated;
 
-    // Proactively refresh if token is expired or near expiry (10 min window)
-    await _proactiveTokenRefresh();
-
-    // Start location tracking only if not already running (avoid duplicate streams)
-    if (!LocationService().isTracking) {
-      debugPrint('🚀 AuthProvider: Starting location tracking');
-      LocationService().startTracking();
-    } else {
-      debugPrint('✅ AuthProvider: Location tracking already active');
+    // Step 3: Import native tokens again (may have been refreshed by Kotlin)
+    final nativeTokenSet = await _sessionService.getNativeTokens();
+    if (nativeTokenSet != null) {
+      final nativeAccessToken = nativeTokenSet['access_token'] as String?;
+      final nativeVersion = nativeTokenSet['token_version'] as int? ?? 0;
+      if (nativeAccessToken != null && nativeAccessToken.isNotEmpty && nativeVersion > 0) {
+        final flutterVersion = session['token_version'] as int? ?? 0;
+        if (nativeVersion > flutterVersion) {
+          debugPrint('[AuthProvider] Native has newer tokens — importing');
+          await _sessionService.importNativeTokenSet(nativeTokenSet);
+          _currentUser = (await _sessionService.getSession())?['user_data'] ?? _currentUser;
+        }
+      }
     }
 
-    // Background fire-and-forget tasks — don't block the UI
+    // Step 4: Attempt startup refresh
+    final needsRefresh = await _sessionService.shouldRefreshToken(thresholdMinutes: 10);
+    if (needsRefresh) {
+      final refreshOutcome = await _refreshCoord.refreshIfNeeded(force: true);
+      switch (refreshOutcome) {
+        case RefreshOutcome.success:
+          _status = AuthStatus.authenticated;
+        case RefreshOutcome.notNeeded:
+          _status = AuthStatus.authenticated;
+        case RefreshOutcome.temporaryFailure:
+          _status = AuthStatus.offlineAuthenticated;
+          _startupError = 'Could not refresh token — offline mode';
+        case RefreshOutcome.permanentFailure:
+          final isOngoingRide = LocationService().activeRouteId != null;
+          if (isOngoingRide) {
+            _status = AuthStatus.offlineAuthenticated;
+            _startupError = 'Session may expire soon';
+          } else {
+            await logout();
+            return;
+          }
+      }
+    } else {
+      _status = AuthStatus.authenticated;
+    }
+
+    // Step 5: Start location tracking
+    if (!LocationService().isTracking) {
+      LocationService().startTracking();
+    }
+
+    // Step 6: Fire-and-forget background tasks
     unawaited(DriverConfigService().fetchConfig());
     unawaited(PushNotificationService().registerWithBackend());
 
-    // Single notifyListeners at the end — after all state is ready
     notifyListeners();
   }
 
-  // ── Proactive token refresh ────────────────────────────────────────────────
-  /// Uses SessionService.shouldRefreshToken() — single source of truth
-  /// for expiry logic. Never throws; any failure is logged and swallowed
-  /// so the app always opens.
-  Future<void> _proactiveTokenRefresh() async {
+  Future<void> _importNativeTokensIfNewer() async {
     try {
-      final needsRefresh = await _sessionService.shouldRefreshToken(thresholdMinutes: 10);
-      if (!needsRefresh) return;
+      final nativeTokenSet = await _nativeAuth.importNativeTokens();
+      if (nativeTokenSet == null) return;
 
-      debugPrint('⏰ AuthProvider: Refreshing token silently...');
-      final result = await _authService.refreshToken();
-      if (result['success'] == true) {
-        debugPrint('✅ AuthProvider: Token refreshed OK');
-        await BackgroundTrackingService().syncSession();
-      } else {
-        debugPrint('⚠️ AuthProvider: Proactive refresh failed — will retry on next 401');
-        // Don't logout — ApiClient interceptor handles actual 401 with retry
+      final nativeVersion = nativeTokenSet['token_version'] as int? ?? 0;
+      if (nativeVersion <= 0) return;
+
+      final session = await _sessionService.getSession();
+      final flutterVersion = session?['token_version'] as int? ?? 0;
+
+      if (nativeVersion > flutterVersion) {
+        debugPrint('[AuthProvider] Importing newer native tokens (v$nativeVersion > v$flutterVersion)');
+        await _sessionService.importNativeTokenSet(nativeTokenSet);
       }
     } catch (e) {
-      debugPrint('⚠️ AuthProvider: Proactive refresh exception: $e');
+      debugPrint('[AuthProvider] Native token import error: $e');
     }
   }
 
-  /// Called when the app resumes from the background.
-  /// Revalidates the session and proactively refreshes the access token if it's near expiry.
-  /// Uses a wider 60-minute threshold since the app could have been backgrounded for hours.
   Future<void> handleAppResume() async {
-    debugPrint('📱 [AuthProvider] App resumed from background — checking session validity');
+    if (_status == AuthStatus.unauthenticated || _status == AuthStatus.authenticationError) return;
 
-    // Only refresh if the driver is currently authenticated
-    if (_status != AuthStatus.authenticated) return;
+    debugPrint('[AuthProvider] App resumed — checking session');
 
-    // Always attempt a proactive refresh on resume with a wide threshold (60 min),
-    // since the app may have been in the background for hours.
+    // Step 1: Import any newer tokens from native
+    await _importNativeTokensIfNewer();
+
+    // Step 2: Check if native requires login
+    final requiresLogin = await _nativeAuth.isRequiresLogin();
+    if (requiresLogin) {
+      final isOngoingRide = LocationService().activeRouteId != null;
+      if (!isOngoingRide) {
+        debugPrint('[AuthProvider] Native requires login — logging out');
+        await logout();
+        return;
+      }
+    }
+
+    // Step 3: Refresh if needed
     try {
       final needsRefresh = await _sessionService.shouldRefreshToken(thresholdMinutes: 60);
       if (!needsRefresh) {
-        debugPrint('✅ [AuthProvider] Token still fresh — no refresh needed on resume');
+        _status = AuthStatus.authenticated;
+        notifyListeners();
         return;
       }
-      debugPrint('⏰ [AuthProvider] Token near/past expiry — refreshing on resume...');
-      final result = await _authService.refreshToken();
-      if (result['success'] == true) {
-        debugPrint('✅ [AuthProvider] Token refreshed successfully on resume');
-        await BackgroundTrackingService().syncSession();
-      } else {
-        debugPrint('⚠️ [AuthProvider] Resume refresh failed: ${result['error']} (${result['errorCode']})');
-        // If the refresh token itself is invalid, logout cleanly
-        if (result['errorCode'] == 'INVALID_REFRESH') {
-          final bool isOngoingRide = LocationService().activeRouteId != null;
-          if (isOngoingRide) {
-            debugPrint('🛡️ [AuthProvider] Active ride — suppressing logout on resume refresh failure.');
-          } else {
-            debugPrint('🔒 [AuthProvider] Refresh token invalid — logging out');
+
+      debugPrint('[AuthProvider] Refreshing on resume...');
+      final result = await _refreshCoord.refreshIfNeeded(force: true);
+
+      switch (result) {
+        case RefreshOutcome.success:
+          _status = AuthStatus.authenticated;
+          await BackgroundTrackingService().syncSession();
+        case RefreshOutcome.notNeeded:
+          _status = AuthStatus.authenticated;
+        case RefreshOutcome.temporaryFailure:
+          _status = AuthStatus.offlineAuthenticated;
+        case RefreshOutcome.permanentFailure:
+          final isOngoingRide = LocationService().activeRouteId != null;
+          if (!isOngoingRide) {
             await logout();
+            return;
           }
-        }
+          _status = AuthStatus.offlineAuthenticated;
       }
+
+      notifyListeners();
     } catch (e) {
-      debugPrint('⚠️ [AuthProvider] Resume refresh exception: $e');
+      debugPrint('[AuthProvider] Resume refresh exception: $e');
+      _status = AuthStatus.offlineAuthenticated;
+      notifyListeners();
     }
   }
 
-  // ── Unauthenticated fallback ───────────────────────────────────────────────
   Future<void> _resolveUnauthenticated() async {
     final tempSession = await _sessionService.getTempSession();
     if (tempSession != null) {
@@ -180,44 +233,29 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  // ── verifyDevice ───────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> verifyDevice(String license) async {
-    debugPrint('🟡 [AuthProvider] verifyDevice() called with license: "$license"');
+    debugPrint('[AuthProvider] verifyDevice() for license: "$license"');
     final deviceData = await _deviceService.getDeviceData();
-    debugPrint('🟡 [AuthProvider] Device data collected: $deviceData');
     final cleanDl = license.trim().toUpperCase();
-    debugPrint('🟡 [AuthProvider] Calling AuthService.verifyDevice for DL: $cleanDl');
     final result = await _authService.verifyDevice(
         dlNumber: cleanDl, deviceData: deviceData);
-    debugPrint('🟡 [AuthProvider] AuthService.verifyDevice result: $result');
 
     if (result['success'] == true) {
       _accounts = result['vendors'] ?? [];
       _driver   = {'license_number': cleanDl};
       _status   = AuthStatus.tempAuthenticated;
-      debugPrint('🟡 [AuthProvider] Saving temp session. vendors count: ${_accounts.length}');
       await _sessionService.setTempSession(
         tempToken: 'verify_stage',
         accounts:  _accounts,
         driver:    _driver,
       );
-      // ⚠️ Do NOT call notifyListeners() here when there is exactly 1 vendor.
-      // LoginScreen._proceedWithVendorSelection handles the single-vendor case
-      // by calling selectTenant() directly. If we notify here, AuthWrapper
-      // rebuilds and shows VendorSelectScreen which also auto-calls selectTenant,
-      // causing a duplicate concurrent API call → crash / silent logout.
       if (_accounts.length != 1) {
         notifyListeners();
       }
-      debugPrint('🟡 [AuthProvider] Temp session saved. notifyListeners skipped for single-vendor fast-path.');
-    } else {
-      debugPrint('🟡 [AuthProvider] verifyDevice not successful: ${result["error"]}');
     }
     return result;
   }
 
-
-  // ── selectTenant ───────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> selectTenant(dynamic vendor, String license) async {
     final deviceData = await _deviceService.getDeviceData();
     final vId = vendor['vendor_id']?.toString();
@@ -237,16 +275,13 @@ class AuthProvider extends ChangeNotifier {
     if (result['success'] == true) {
       _currentUser = result['user_data'];
 
-      // Extract and cache the driver profile so name/photo are available immediately
       final userData = result['user_data'];
       _driver = userData?['driver'] ??
                 userData?['user']?['driver'] ??
-                _driver; // fallback to existing if not present
+                _driver;
 
       final token = result['access_token'];
 
-
-      // Also write to SharedPreferences for legacy screens that read from prefs
       final prefs = await SharedPreferences.getInstance();
       if (token    != null) await prefs.setString('token', token);
       if (userData != null) await prefs.setString('user_data', json.encode(userData));
@@ -258,8 +293,6 @@ class AuthProvider extends ChangeNotifier {
 
       _status = AuthStatus.authenticated;
 
-      debugPrint('🚀 AuthProvider: Tenant selected, starting location tracking');
-      // Stop first to avoid duplicate stream from init()
       await LocationService().stopTracking();
       LocationService().startTracking();
 
@@ -271,7 +304,6 @@ class AuthProvider extends ChangeNotifier {
     return result;
   }
 
-  // ── switchCompany ──────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> switchCompany(dynamic account) async {
     final session  = await _sessionService.getSession();
     final userData = session?['user_data'];
@@ -287,7 +319,6 @@ class AuthProvider extends ChangeNotifier {
     final deviceData = await _deviceService.getDeviceData();
 
     try {
-      debugPrint('🔄 AuthProvider: Switching company V:$vId T:$tId');
       final result = await _authService.selectTenant(
         dlNumber:   dlNumber,
         deviceData: deviceData,
@@ -296,21 +327,16 @@ class AuthProvider extends ChangeNotifier {
       );
 
       if (result['success'] == true) {
-        // Refresh token first so init() starts with a valid token
-        await _proactiveTokenRefresh();
         await init();
-        debugPrint('✅ AuthProvider: Company switch complete');
         return result;
       }
-      debugPrint('⚠️ AuthProvider: Company switch failed: ${result['error']}');
       return result;
     } catch (e, stack) {
-      debugPrint('❌ AuthProvider.switchCompany error: $e\n$stack');
+      debugPrint('[AuthProvider] switchCompany error: $e\n$stack');
       return {'success': false, 'error': e.toString()};
     }
   }
 
-  // ── refreshToken ───────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> refreshToken() async {
     final result = await _authService.refreshToken();
     if (result['success'] == true) {
@@ -319,28 +345,20 @@ class AuthProvider extends ChangeNotifier {
     return result;
   }
 
-  // ── logout ─────────────────────────────────────────────────────────────────
-  /// Only called on explicit driver action (Logout button).
-  /// Stops background tracking service BEFORE clearing session so the
-  /// Kotlin service has a chance to read the stop signal.
   Future<void> logout() async {
-    debugPrint('🛑 AuthProvider: Driver initiated logout');
+    debugPrint('[AuthProvider] Driver initiated logout');
 
-    // Call backend logout to invalidate session in Redis/memory
+    // Prevent refresh from writing tokens after logout
+    await _nativeAuth.setAuthState('REQUIRES_LOGIN');
+
     try {
-      final res = await _authService.logout();
-      debugPrint('🚪 AuthProvider: Backend logout status: ${res['success']}');
+      await _authService.logout();
     } catch (e) {
-      debugPrint('⚠️ AuthProvider: Backend logout API call failed: $e');
+      debugPrint('[AuthProvider] Backend logout API call failed: $e');
     }
 
-    // Stop Kotlin background service first
     await BackgroundTrackingService().stopBackgroundTracking();
-
-    // Stop Flutter GPS stream
     await LocationService().stopTracking();
-
-    // Clear all session data
     await _sessionService.clearSession();
     await _sessionService.clearTempSession();
 

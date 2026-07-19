@@ -20,7 +20,6 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             "android.intent.action.QUICKBOOT_POWERON" -> {
-                // HTC devices use QUICKBOOT_POWERON instead of BOOT_COMPLETED
                 checkAndStartService(context)
             }
         }
@@ -31,15 +30,17 @@ class BootReceiver : BroadcastReceiver() {
             LocationForegroundService.PREFS_NAME, Context.MODE_PRIVATE
         )
         val routeId = prefs.getString(LocationForegroundService.KEY_ROUTE_ID, "") ?: ""
-        val token = prefs.getString(LocationForegroundService.KEY_TOKEN, "") ?: ""
+
+        val tokenRepository = DriverTokenRepository.getInstance(context)
+        val hasToken = tokenRepository.hasTokens() && tokenRepository.getAuthenticationState() == DriverTokenRepository.AuthenticationState.AUTHENTICATED
 
         val hasGpsPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
         } else {
-            true // Legacy support
+            true
         }
 
-        if (routeId.isNotEmpty() && token.isNotEmpty() && hasGpsPermission) {
+        if (routeId.isNotEmpty() && hasToken && hasGpsPermission) {
             Log.i(TAG, "Active route ($routeId), token, and permissions found after boot — restarting tracking service")
             val serviceIntent = Intent(context, LocationForegroundService::class.java).apply {
                 action = LocationForegroundService.ACTION_START
@@ -50,7 +51,7 @@ class BootReceiver : BroadcastReceiver() {
                 context.startService(serviceIntent)
             }
         } else {
-            Log.i(TAG, "Boot checks failed: route=$routeId, token=${token.isNotEmpty()}, permission=$hasGpsPermission — service not started")
+            Log.i(TAG, "Boot checks failed: route=$routeId, hasToken=$hasToken, permission=$hasGpsPermission — service not started")
         }
     }
 }

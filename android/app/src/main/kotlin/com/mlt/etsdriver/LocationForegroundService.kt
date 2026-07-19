@@ -65,6 +65,11 @@ class LocationForegroundService : Service() {
     private var heartbeatJob: Job? = null
     private val uploadMutex = Mutex()
 
+    // Auth infrastructure
+    private lateinit var tokenRepository: DriverTokenRepository
+    private lateinit var authHttpClient: NativeAuthHttpClient
+    private lateinit var refreshCoordinator: DriverTokenRefreshCoordinator
+
     // ─────────────────────────────────────────────────────────────────────────
     // Lifecycle
     // ─────────────────────────────────────────────────────────────────────────
@@ -78,6 +83,11 @@ class LocationForegroundService : Service() {
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
         registerNetworkCallback()
+
+        // Initialize shared token repository
+        tokenRepository = DriverTokenRepository.getInstance(this)
+        authHttpClient = NativeAuthHttpClient(BASE_URL)
+        refreshCoordinator = DriverTokenRefreshCoordinator(tokenRepository, authHttpClient)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -430,15 +440,21 @@ class LocationForegroundService : Service() {
     private suspend fun uploadPendingLocations() {
         if (uploadMutex.isLocked) return
         uploadMutex.withLock {
-            val token = prefs.getString(KEY_TOKEN, "") ?: ""
-            if (token.isEmpty()) {
+            val tokens = tokenRepository.readTokens()
+            if (tokens.accessToken.isEmpty()) {
                 Log.w(TAG, "No access token — skipping upload")
+                return
+            }
+
+            val authState = tokenRepository.getAuthenticationState()
+            if (authState == DriverTokenRepository.AuthenticationState.REQUIRES_LOGIN) {
+                Log.w(TAG, "Auth requires login — stopping authenticated uploads")
                 return
             }
 
             while (coroutineContext.isActive) {
                 val queued = dbHelper.getOldestLocation() ?: break
-                val success = sendLocationPingSync(queued, token)
+                val success = sendLocationPingWithRefresh(queued)
                 if (success) {
                     dbHelper.deleteLocation(queued.id)
                 } else {
@@ -446,6 +462,100 @@ class LocationForegroundService : Service() {
                     break
                 }
             }
+        }
+    }
+
+    private suspend fun sendLocationPingWithRefresh(queued: QueuedLocation): Boolean {
+        if (tokenRepository.getAuthenticationState() == DriverTokenRepository.AuthenticationState.REQUIRES_LOGIN) {
+            Log.w(TAG, "Auth requires login — not uploading location")
+            return false
+        }
+
+        val tokens = tokenRepository.readTokens()
+        if (tokens.accessToken.isEmpty()) return false
+
+        val result = sendLocationPingSync(queued, tokens.accessToken)
+        if (result) return true
+
+        val currentTokens = tokenRepository.readTokens()
+        val latestToken = currentTokens.accessToken
+        if (latestToken != tokens.accessToken && latestToken.isNotEmpty()) {
+            Log.i(TAG, "Token changed externally — retrying with latest")
+            return sendLocationPingSync(queued, latestToken)
+        }
+
+        val httpResult = executeLocationPing(queued, tokens.accessToken)
+        if (httpResult == null) return false
+        if (httpResult.statusCode != 401) return false
+
+        Log.i(TAG, "Location upload received 401 — attempting token refresh")
+        return performLocationRefreshRetry(queued, tokens.accessToken, httpResult)
+    }
+
+    private suspend fun performLocationRefreshRetry(
+        queued: QueuedLocation,
+        usedToken: String,
+        httpResult: NativeAuthHttpClient.HttpResult
+    ): Boolean {
+        if (httpResult.responseBody.isNotEmpty()) {
+            val classifyResult = AuthErrorClassifier.classify(httpResult.statusCode, httpResult.responseBody)
+            if (classifyResult is AuthPermanentFailure) {
+                Log.w(TAG, "Permanent auth failure: ${classifyResult.code} — marking requires login")
+                tokenRepository.markRequiresLogin()
+                return false
+            }
+        }
+
+        val refreshResult = refreshCoordinator.refreshForToken(usedToken)
+
+        return when (refreshResult) {
+            is DriverTokenRefreshCoordinator.RefreshResult.Success -> {
+                Log.i(TAG, "Refresh succeeded — retrying location upload")
+                sendLocationPingSync(queued, refreshResult.newAccessToken)
+            }
+            is DriverTokenRefreshCoordinator.RefreshResult.NotNeeded -> {
+                Log.i(TAG, "Token already refreshed — retrying with latest")
+                sendLocationPingSync(queued, refreshResult.accessToken)
+            }
+            is DriverTokenRefreshCoordinator.RefreshResult.PermanentFailure -> {
+                Log.w(TAG, "Refresh permanent failure: ${refreshResult.code}")
+                false
+            }
+            is DriverTokenRefreshCoordinator.RefreshResult.TemporaryFailure -> {
+                Log.w(TAG, "Refresh temporary failure: ${refreshResult.message}")
+                false
+            }
+        }
+    }
+
+    private fun executeLocationPing(queued: QueuedLocation, token: String): NativeAuthHttpClient.HttpResult? {
+        val headers = mutableMapOf<String, String>()
+        val driverId = prefs.getString(KEY_DRIVER_ID, "") ?: ""
+        val tenantId = prefs.getString(KEY_TENANT_ID, "") ?: ""
+        val vendorId = prefs.getString(KEY_VENDOR_ID, "") ?: ""
+        if (driverId.isNotEmpty()) headers["X-Driver-Id"] = driverId
+        if (tenantId.isNotEmpty()) headers["X-Tenant-Id"] = tenantId
+        if (vendorId.isNotEmpty()) headers["X-Vendor-Id"] = vendorId
+
+        val speedKmh = queued.speed
+        val queryParams = mutableMapOf(
+            "route_id" to queued.routeId,
+            "latitude" to queued.latitude.toString(),
+            "longitude" to queued.longitude.toString()
+        )
+        if (speedKmh != null) {
+            queryParams["speed"] = "%.2f".format(speedKmh)
+        }
+
+        return try {
+            authHttpClient.sendAuthenticatedPost(
+                urlString = "$BASE_URL/api/v1/driver/location",
+                accessToken = token,
+                queryParams = queryParams,
+                headers = headers
+            )
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -533,10 +643,20 @@ class LocationForegroundService : Service() {
     }
 
     private fun sendHeartbeat() {
-        val token = prefs.getString(KEY_TOKEN, "") ?: ""
         val routeId = prefs.getString(KEY_ROUTE_ID, "") ?: ""
-        if (token.isEmpty() || routeId.isEmpty()) {
-            Log.w(TAG, "No active token/route for heartbeat")
+        if (routeId.isEmpty()) {
+            Log.w(TAG, "No active route for heartbeat")
+            return
+        }
+
+        if (tokenRepository.getAuthenticationState() == DriverTokenRepository.AuthenticationState.REQUIRES_LOGIN) {
+            Log.w(TAG, "Auth requires login — skipping heartbeat")
+            return
+        }
+
+        val tokens = tokenRepository.readTokens()
+        if (tokens.accessToken.isEmpty()) {
+            Log.w(TAG, "No access token for heartbeat")
             return
         }
 
@@ -546,61 +666,66 @@ class LocationForegroundService : Service() {
         val version = getAppVersion()
         val tracking = isServiceRunning
 
-        val url = "$BASE_URL/api/v1/driver/heartbeat" +
-                "?route_id=${routeId}" +
-                "&battery=${battery}" +
-                "&gps_enabled=${gps}" +
-                "&network=${network}" +
-                "&version=${version}" +
-                "&tracking_active=${tracking}"
+        val queryParams = mutableMapOf(
+            "route_id" to routeId,
+            "battery" to battery.toString(),
+            "gps_enabled" to gps.toString(),
+            "network" to network,
+            "version" to version,
+            "tracking_active" to tracking.toString()
+        )
+
+        val headers = mutableMapOf<String, String>()
+        val driverId = prefs.getString(KEY_DRIVER_ID, "") ?: ""
+        val tenantId = prefs.getString(KEY_TENANT_ID, "") ?: ""
+        val vendorId = prefs.getString(KEY_VENDOR_ID, "") ?: ""
+        if (driverId.isNotEmpty()) headers["X-Driver-Id"] = driverId
+        if (tenantId.isNotEmpty()) headers["X-Tenant-Id"] = tenantId
+        if (vendorId.isNotEmpty()) headers["X-Vendor-Id"] = vendorId
 
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val driverId = prefs.getString(KEY_DRIVER_ID, "") ?: ""
-                val tenantId = prefs.getString(KEY_TENANT_ID, "") ?: ""
-                val vendorId = prefs.getString(KEY_VENDOR_ID, "") ?: ""
+                var result = authHttpClient.sendAuthenticatedPost(
+                    urlString = "$BASE_URL/api/v1/driver/heartbeat",
+                    accessToken = tokens.accessToken,
+                    queryParams = queryParams,
+                    headers = headers
+                )
 
-                Log.d(TAG, "╔══ 🌐 KOTLIN BACKGROUND HEARTBEAT REQUEST ══════════════════")
-                Log.d(TAG, "║ Method: POST")
-                Log.d(TAG, "║ URL: $url")
-                Log.d(TAG, "║ Headers:")
-                Log.d(TAG, "║   Authorization: Bearer ...${token.takeLast(10)}")
-                if (driverId.isNotEmpty()) Log.d(TAG, "║   X-Driver-Id: $driverId")
-                if (tenantId.isNotEmpty()) Log.d(TAG, "║   X-Tenant-Id: $tenantId")
-                if (vendorId.isNotEmpty()) Log.d(TAG, "║   X-Vendor-Id: $vendorId")
-                Log.d(TAG, "╚════════════════════════════════════════════════════════════")
+                if (result.statusCode == 401) {
+                    Log.i(TAG, "Heartbeat received 401 — attempting refresh")
+                    val refreshResult = refreshCoordinator.refreshForToken(tokens.accessToken)
 
-                val conn = URL(url).openConnection() as HttpURLConnection
-                conn.apply {
-                    requestMethod = "POST"
-                    setRequestProperty("Authorization", "Bearer $token")
-                    setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("Accept", "application/json")
-                    if (driverId.isNotEmpty()) setRequestProperty("X-Driver-Id", driverId)
-                    if (tenantId.isNotEmpty()) setRequestProperty("X-Tenant-Id", tenantId)
-                    if (vendorId.isNotEmpty()) setRequestProperty("X-Vendor-Id", vendorId)
-
-                    connectTimeout = 10_000
-                    readTimeout = 10_000
-                    doOutput = true
-                    OutputStreamWriter(outputStream).use { it.write("") }
-                }
-                val code = conn.responseCode
-                val responseBody = try {
-                    if (code in 200..299) {
-                        conn.inputStream.bufferedReader().use { it.readText() }
-                    } else {
-                        conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    when (refreshResult) {
+                        is DriverTokenRefreshCoordinator.RefreshResult.Success -> {
+                            Log.i(TAG, "Heartbeat refresh succeeded — retrying")
+                            result = authHttpClient.sendAuthenticatedPost(
+                                urlString = "$BASE_URL/api/v1/driver/heartbeat",
+                                accessToken = refreshResult.newAccessToken,
+                                queryParams = queryParams,
+                                headers = headers
+                            )
+                        }
+                        is DriverTokenRefreshCoordinator.RefreshResult.NotNeeded -> {
+                            Log.i(TAG, "Heartbeat token already refreshed — retrying")
+                            result = authHttpClient.sendAuthenticatedPost(
+                                urlString = "$BASE_URL/api/v1/driver/heartbeat",
+                                accessToken = refreshResult.accessToken,
+                                queryParams = queryParams,
+                                headers = headers
+                            )
+                        }
+                        is DriverTokenRefreshCoordinator.RefreshResult.PermanentFailure -> {
+                            Log.w(TAG, "Heartbeat refresh permanent failure: ${refreshResult.code}")
+                            tokenRepository.markRequiresLogin()
+                        }
+                        is DriverTokenRefreshCoordinator.RefreshResult.TemporaryFailure -> {
+                            Log.w(TAG, "Heartbeat refresh temporary failure — will retry next cycle")
+                        }
                     }
-                } catch (ex: Exception) {
-                    "Failed to read body: ${ex.message}"
                 }
-                conn.disconnect()
 
-                Log.d(TAG, "╔══ ✅ KOTLIN BACKGROUND HEARTBEAT RESPONSE ═════════════════")
-                Log.d(TAG, "║ Status: $code")
-                Log.d(TAG, "║ Body: $responseBody")
-                Log.d(TAG, "╚════════════════════════════════════════════════════════════")
+                Log.d(TAG, "Heartbeat result: status=${result.statusCode}")
             } catch (e: Exception) {
                 Log.w(TAG, "❌ Heartbeat execution exception: ${e.message}")
             }

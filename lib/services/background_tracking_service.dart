@@ -147,4 +147,10 @@ class BackgroundTrackingService {
       _log.e('❌ BackgroundTracking syncSession error: $e');
     }
   }
+
+  /// Sync current session from SessionService to both SharedPreferences
+  /// and the native encrypted token repository.
+  Future<void> syncBackgroundSessionFromCurrent() async {
+    await SessionService().syncBackgroundSessionFromCurrent();
+  }
 }

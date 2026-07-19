@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services")
 }
@@ -51,4 +52,10 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging")
     // FusedLocationProviderClient for Kotlin background tracking service
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    // Encrypted SharedPreferences for secure token storage
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    testImplementation("org.jetbrains.kotlin:kotlin-test:2.2.20")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
+    testImplementation("org.json:json:20231013")
 }
