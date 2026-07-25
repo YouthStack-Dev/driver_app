@@ -223,20 +223,19 @@ class RouteService {
   }
 
   /// Board the escort — POST /driver/escort/board.
-  /// Must be called (with the escort's OTP) before any employee pickup on
-  /// routes that have an assigned escort.
+  /// [code] is omitted for `off` mode (board immediately) and required for
+  /// `universal` / `unique` modes.
   Future<Map<String, dynamic>> escortBoard({
     required String routeId,
-    required String otp,
+    String? code,
   }) async {
     try {
       _logger.i('Boarding escort for route: $routeId');
+      final params = <String, dynamic>{'route_id': routeId};
+      if (code != null) params['code'] = code;
       final response = await _dio.post(
         ApiEndpoints.escortBoard,
-        queryParameters: {
-          'route_id': routeId,
-          'otp': int.tryParse(otp) ?? otp, // spec says otp is int
-        },
+        queryParameters: params,
       );
       return {'success': true, 'data': response.data};
     } on DioException catch (e) {

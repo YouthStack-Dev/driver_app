@@ -2168,18 +2168,33 @@ class _RidesScreenState extends State<RidesScreen> {
   }
 
   Future<void> _handleEscortBoard(String routeId, BookingProvider provider) async {
-    final otp = await _showOtpDialog(context, 'Escort');
-    if (otp == null || !mounted) return;
-    final result = await provider.escortBoard(routeId, otp);
+    // Try without code first (handles `off` mode — board immediately).
+    var result = await provider.escortBoard(routeId);
     if (!mounted) return;
+
     if (result['success'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Escort boarded successfully!')));
+      return;
+    }
+
+    // Code required — show dialog for `universal` / `unique` modes.
+    if (result['errorCode'] == 'CODE_REQUIRED') {
+      final code = await _showOtpDialog(context, 'Escort');
+      if (code == null || !mounted) return;
+      result = await provider.escortBoard(routeId, code: code);
+      if (!mounted) return;
+    }
+
+    if (result['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Escort boarded successfully!')));
+      return;
+    }
+
+    final errorCode = result['errorCode'];
+    if (errorCode == 'INVALID_ESCORT_CODE' || errorCode == 'INVALID_ESCORT_OTP') {
+      _showInvalidCodeDialog();
     } else {
-      if (result['errorCode'] == 'INVALID_OTP') {
-        _showInvalidOtpDialog();
-      } else {
-        _showErrorDialog(result['error'] ?? 'Failed to board escort');
-      }
+      _showErrorDialog(result['error'] ?? 'Failed to board escort');
     }
   }
 
@@ -2684,6 +2699,23 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
+  Future<void> _showInvalidCodeDialog() async {
+    return showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Invalid Code', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.red)),
+        content: Text('The code you entered is incorrect. Please try again.', style: GoogleFonts.poppins(fontSize: 13.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: Text('OK', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.blue)),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Returns true when the raw API message is a "driver too far from stop" error.
   bool _isTooFarError(String message) {
     final lower = message.toLowerCase();
@@ -2895,7 +2927,7 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
                       fontSize: 18, fontWeight: FontWeight.bold, color: _C.textPrimary)),
               const SizedBox(height: 8),
               Text(
-                'Enter the 4-digit OTP for ${widget.employeeName} to confirm.',
+                'Enter the verification code for ${widget.employeeName} to confirm.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(fontSize: 13, color: _C.textSecondary, height: 1.5),
               ),

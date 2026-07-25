@@ -38,7 +38,7 @@ class ApiEndpoints {
 
   // Escort
   /// POST — board the escort before any employee pickup on escort routes.
-  /// Query params: route_id, otp.
+  /// Query params: route_id, code (optional — omitted for `off` mode).
   static const String escortBoard = '/api/v1/driver/escort/board';
 
   // Chat — Driver endpoints
