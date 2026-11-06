@@ -5,6 +5,7 @@ import 'package:logger/logger.dart';
 import '../config/constants.dart';
 import 'session_service.dart';
 import 'background_tracking_service.dart';
+import 'route_service.dart';
 
 class LocationService with WidgetsBindingObserver {
   final Logger _logger = Logger();
@@ -40,7 +41,7 @@ class LocationService with WidgetsBindingObserver {
   String? _activeRouteId;
   String? get activeRouteId => _activeRouteId;
   set activeRouteId(String? value) {
-    if (_activeRouteId == value) return;
+    if (_activeRouteId == value && value != null) return;
     _activeRouteId = value;
     _logger.i('📍 Route ID updated in memory: $value');
 
@@ -56,7 +57,9 @@ class LocationService with WidgetsBindingObserver {
             accessToken: token,
           );
         } else {
-          _logger.w('⚠️ Cannot start background tracking: access token is null');
+          _logger.w(
+            '⚠️ Cannot start background tracking: access token is null',
+          );
         }
       });
     } else {
@@ -66,6 +69,40 @@ class LocationService with WidgetsBindingObserver {
       SessionService().clearActiveVehicle();
       BackgroundTrackingService().stopBackgroundTracking();
     }
+  }
+
+  /// Reconcile the route used by location uploads with the backend after login
+  /// or when the backend rejects a completed route.
+  Future<void> refreshActiveRoute() async {
+    final result = await RouteService().getDriverTrips(statusFilter: 'ongoing');
+    if (result['success'] != true) return;
+
+    final routes = result['routes'];
+    final ongoing = routes is List && routes.isNotEmpty ? routes.first : null;
+    if (ongoing is Map) {
+      final routeId = ongoing['route_id']?.toString();
+      if (routeId == null || routeId.isEmpty) return;
+      final vehicle = ongoing['vehicle_id'] ?? ongoing['vehicle']?['id'];
+      activeVehicleId = int.tryParse(vehicle?.toString() ?? '');
+      activeRouteId = routeId;
+    } else {
+      activeRouteId = null;
+      activeVehicleId = null;
+    }
+  }
+
+  Future<void> syncActiveRouteFromRoutes(List<dynamic> routes) async {
+    final ongoing = routes.isEmpty ? null : routes.first;
+    if (ongoing is! Map) {
+      activeRouteId = null;
+      activeVehicleId = null;
+      return;
+    }
+    final routeId = ongoing['route_id']?.toString();
+    if (routeId == null || routeId.isEmpty) return;
+    final vehicle = ongoing['vehicle_id'] ?? ongoing['vehicle']?['id'];
+    activeVehicleId = int.tryParse(vehicle?.toString() ?? '');
+    activeRouteId = routeId;
   }
 
   int? _activeVehicleId;
@@ -109,13 +146,16 @@ class LocationService with WidgetsBindingObserver {
 
   Future<void> _checkPermissionRecovery() async {
     final permission = await Geolocator.checkPermission();
-    final hasPerm = permission == LocationPermission.always ||
+    final hasPerm =
+        permission == LocationPermission.always ||
         permission == LocationPermission.whileInUse;
-    
+
     _updatePermission(hasPerm);
 
     if (hasPerm && _isTracking && _positionStreamSubscription == null) {
-      _logger.i('🔄 GPS Permission restored. Automatically restarting location stream.');
+      _logger.i(
+        '🔄 GPS Permission restored. Automatically restarting location stream.',
+      );
       _subscribeToGpsStream();
     }
   }
@@ -176,32 +216,39 @@ class LocationService with WidgetsBindingObserver {
     final locationSettings = AndroidSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: LocationConfig.distanceFilterMeters, // 0
-      intervalDuration:
-          const Duration(milliseconds: LocationConfig.updateIntervalMs), // 1 s
+      intervalDuration: const Duration(
+        milliseconds: LocationConfig.updateIntervalMs,
+      ), // 1 s
       // Geolocator's internal foreground service config is REMOVED.
       // The Native Kotlin Foreground Service handles the persistent notification.
     );
 
     _positionStreamSubscription =
         Geolocator.getPositionStream(locationSettings: locationSettings).listen(
-      (Position position) {
-        final kmh = (position.speed < 0 ? 0.0 : position.speed) * 3.6;
-        _logger.d('📍 GPS Location: (${position.latitude.toStringAsFixed(5)}, '
-            '${position.longitude.toStringAsFixed(5)}) | '
-            '${kmh.toStringAsFixed(1)} km/h | acc: ${position.accuracy.toStringAsFixed(0)} m');
+          (Position position) {
+            final kmh = (position.speed < 0 ? 0.0 : position.speed) * 3.6;
+            _logger.d(
+              '📍 GPS Location: (${position.latitude.toStringAsFixed(5)}, '
+              '${position.longitude.toStringAsFixed(5)}) | '
+              '${kmh.toStringAsFixed(1)} km/h | acc: ${position.accuracy.toStringAsFixed(0)} m',
+            );
 
-        // Emit to UI stream
-        _positionController.add(position);
-      },
-      onError: (e) {
-        _logger.e('❌ Location stream error: $e. Retrying connection in 5s.');
-        _handleStreamError();
-      },
-      onDone: () {
-        _logger.w('⚠️ Location stream closed unexpectedly. Retrying connection in 5s.');
-        _handleStreamError();
-      },
-    );
+            // Emit to UI stream
+            _positionController.add(position);
+          },
+          onError: (e) {
+            _logger.e(
+              '❌ Location stream error: $e. Retrying connection in 5s.',
+            );
+            _handleStreamError();
+          },
+          onDone: () {
+            _logger.w(
+              '⚠️ Location stream closed unexpectedly. Retrying connection in 5s.',
+            );
+            _handleStreamError();
+          },
+        );
     _logger.i('✅ GPS stream subscription created');
   }
 
@@ -226,7 +273,8 @@ class LocationService with WidgetsBindingObserver {
     await _positionStreamSubscription?.cancel();
     _positionStreamSubscription = null;
     _isTracking = false;
-    _activeRouteId = null;
+    activeRouteId = null;
+    activeVehicleId = null;
     _trackingStateController.add(false);
   }
 }

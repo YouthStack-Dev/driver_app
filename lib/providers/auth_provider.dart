@@ -24,10 +24,10 @@ enum AuthStatus {
 }
 
 class AuthProvider extends ChangeNotifier {
-  final AuthService    _authService    = AuthService();
+  final AuthService _authService = AuthService();
   final SessionService _sessionService = SessionService();
-  final DeviceService  _deviceService  = DeviceService();
-  final NativeAuthBridge _nativeAuth  = NativeAuthBridge();
+  final DeviceService _deviceService = DeviceService();
+  final NativeAuthBridge _nativeAuth = NativeAuthBridge();
   final FlutterRefreshCoordinator _refreshCoord = FlutterRefreshCoordinator();
 
   AuthStatus _status = AuthStatus.unknown;
@@ -38,7 +38,7 @@ class AuthProvider extends ChangeNotifier {
 
   List<dynamic> _accounts = [];
   Map<String, dynamic>? _driver;
-  List<dynamic> get vendors  => _accounts;
+  List<dynamic> get vendors => _accounts;
   List<dynamic> get accounts => _accounts;
   Map<String, dynamic>? get driver => _driver;
 
@@ -47,19 +47,21 @@ class AuthProvider extends ChangeNotifier {
 
   String get tenantId {
     if (_currentUser == null) return 'N/A';
-    final val = _currentUser!['tenant_id'] ??
-                _currentUser!['account']?['tenant_id'] ??
-                _currentUser!['user']?['tenant_id'] ??
-                _currentUser!['user']?['driver']?['tenant_id'] ??
-                _currentUser!['user']?['tenant']?['tenant_id'];
+    final val =
+        _currentUser!['tenant_id'] ??
+        _currentUser!['account']?['tenant_id'] ??
+        _currentUser!['user']?['tenant_id'] ??
+        _currentUser!['user']?['driver']?['tenant_id'] ??
+        _currentUser!['user']?['tenant']?['tenant_id'];
     return val?.toString() ?? 'N/A';
   }
 
   String get vendorId {
     if (_currentUser == null) return 'N/A';
-    final val = _currentUser!['vendor_id'] ??
-                _currentUser!['account']?['vendor_id'] ??
-                _currentUser!['user']?['driver']?['vendor_id'];
+    final val =
+        _currentUser!['vendor_id'] ??
+        _currentUser!['account']?['vendor_id'] ??
+        _currentUser!['user']?['driver']?['vendor_id'];
     return val?.toString() ?? 'N/A';
   }
 
@@ -98,18 +100,24 @@ class AuthProvider extends ChangeNotifier {
     if (nativeTokenSet != null) {
       final nativeAccessToken = nativeTokenSet['access_token'] as String?;
       final nativeVersion = nativeTokenSet['token_version'] as int? ?? 0;
-      if (nativeAccessToken != null && nativeAccessToken.isNotEmpty && nativeVersion > 0) {
+      if (nativeAccessToken != null &&
+          nativeAccessToken.isNotEmpty &&
+          nativeVersion > 0) {
         final flutterVersion = session['token_version'] as int? ?? 0;
         if (nativeVersion > flutterVersion) {
           debugPrint('[AuthProvider] Native has newer tokens — importing');
           await _sessionService.importNativeTokenSet(nativeTokenSet);
-          _currentUser = (await _sessionService.getSession())?['user_data'] ?? _currentUser;
+          _currentUser =
+              (await _sessionService.getSession())?['user_data'] ??
+              _currentUser;
         }
       }
     }
 
     // Step 4: Attempt startup refresh
-    final needsRefresh = await _sessionService.shouldRefreshToken(thresholdMinutes: 10);
+    final needsRefresh = await _sessionService.shouldRefreshToken(
+      thresholdMinutes: 10,
+    );
     if (needsRefresh) {
       final refreshOutcome = await _refreshCoord.refreshIfNeeded(force: true);
       switch (refreshOutcome) {
@@ -133,6 +141,10 @@ class AuthProvider extends ChangeNotifier {
     } else {
       _status = AuthStatus.authenticated;
     }
+
+    // Refresh the backend-owned route before any uploader can use a route
+    // restored from an older session.
+    await LocationService().refreshActiveRoute();
 
     // Step 5: Start location tracking
     if (!LocationService().isTracking) {
@@ -158,7 +170,9 @@ class AuthProvider extends ChangeNotifier {
       final flutterVersion = session?['token_version'] as int? ?? 0;
 
       if (nativeVersion > flutterVersion) {
-        debugPrint('[AuthProvider] Importing newer native tokens (v$nativeVersion > v$flutterVersion)');
+        debugPrint(
+          '[AuthProvider] Importing newer native tokens (v$nativeVersion > v$flutterVersion)',
+        );
         await _sessionService.importNativeTokenSet(nativeTokenSet);
       }
     } catch (e) {
@@ -167,7 +181,9 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> handleAppResume() async {
-    if (_status == AuthStatus.unauthenticated || _status == AuthStatus.authenticationError) return;
+    if (_status == AuthStatus.unauthenticated ||
+        _status == AuthStatus.authenticationError)
+      return;
 
     debugPrint('[AuthProvider] App resumed — checking session');
 
@@ -187,7 +203,9 @@ class AuthProvider extends ChangeNotifier {
 
     // Step 3: Refresh if needed
     try {
-      final needsRefresh = await _sessionService.shouldRefreshToken(thresholdMinutes: 60);
+      final needsRefresh = await _sessionService.shouldRefreshToken(
+        thresholdMinutes: 60,
+      );
       if (!needsRefresh) {
         _status = AuthStatus.authenticated;
         notifyListeners();
@@ -225,9 +243,9 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _resolveUnauthenticated() async {
     final tempSession = await _sessionService.getTempSession();
     if (tempSession != null) {
-      _accounts  = tempSession['accounts'] ?? [];
-      _driver    = tempSession['driver'];
-      _status    = AuthStatus.tempAuthenticated;
+      _accounts = tempSession['accounts'] ?? [];
+      _driver = tempSession['driver'];
+      _status = AuthStatus.tempAuthenticated;
     } else {
       _status = AuthStatus.unauthenticated;
     }
@@ -238,16 +256,18 @@ class AuthProvider extends ChangeNotifier {
     final deviceData = await _deviceService.getDeviceData();
     final cleanDl = license.trim().toUpperCase();
     final result = await _authService.verifyDevice(
-        dlNumber: cleanDl, deviceData: deviceData);
+      dlNumber: cleanDl,
+      deviceData: deviceData,
+    );
 
     if (result['success'] == true) {
       _accounts = result['vendors'] ?? [];
-      _driver   = {'license_number': cleanDl};
-      _status   = AuthStatus.tempAuthenticated;
+      _driver = {'license_number': cleanDl};
+      _status = AuthStatus.tempAuthenticated;
       await _sessionService.setTempSession(
         tempToken: 'verify_stage',
-        accounts:  _accounts,
-        driver:    _driver,
+        accounts: _accounts,
+        driver: _driver,
       );
       if (_accounts.length != 1) {
         notifyListeners();
@@ -256,7 +276,10 @@ class AuthProvider extends ChangeNotifier {
     return result;
   }
 
-  Future<Map<String, dynamic>> selectTenant(dynamic vendor, String license) async {
+  Future<Map<String, dynamic>> selectTenant(
+    dynamic vendor,
+    String license,
+  ) async {
     final deviceData = await _deviceService.getDeviceData();
     final vId = vendor['vendor_id']?.toString();
     final tId = vendor['tenant_id']?.toString();
@@ -266,33 +289,36 @@ class AuthProvider extends ChangeNotifier {
     }
 
     final result = await _authService.selectTenant(
-      dlNumber:   license,
+      dlNumber: license,
       deviceData: deviceData,
-      vendorId:   vId,
-      tenantId:   tId,
+      vendorId: vId,
+      tenantId: tId,
     );
 
     if (result['success'] == true) {
       _currentUser = result['user_data'];
 
       final userData = result['user_data'];
-      _driver = userData?['driver'] ??
-                userData?['user']?['driver'] ??
-                _driver;
+      _driver = userData?['driver'] ?? userData?['user']?['driver'] ?? _driver;
 
       final token = result['access_token'];
 
       final prefs = await SharedPreferences.getInstance();
-      if (token    != null) await prefs.setString('token', token);
-      if (userData != null) await prefs.setString('user_data', json.encode(userData));
+      if (token != null) await prefs.setString('token', token);
+      if (userData != null)
+        await prefs.setString('user_data', json.encode(userData));
       if (userData != null) {
-        if (userData['driver_id'] != null) await prefs.setString('driver_id', userData['driver_id'].toString());
-        if (userData['tenant_id'] != null) await prefs.setString('tenant_id', userData['tenant_id'].toString());
-        if (userData['vendor_id'] != null) await prefs.setString('vendor_id', userData['vendor_id'].toString());
+        if (userData['driver_id'] != null)
+          await prefs.setString('driver_id', userData['driver_id'].toString());
+        if (userData['tenant_id'] != null)
+          await prefs.setString('tenant_id', userData['tenant_id'].toString());
+        if (userData['vendor_id'] != null)
+          await prefs.setString('vendor_id', userData['vendor_id'].toString());
       }
 
       _status = AuthStatus.authenticated;
 
+      await LocationService().refreshActiveRoute();
       await LocationService().stopTracking();
       LocationService().startTracking();
 
@@ -305,25 +331,32 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> switchCompany(dynamic account) async {
-    final session  = await _sessionService.getSession();
+    final session = await _sessionService.getSession();
     final userData = session?['user_data'];
-    final dlNumber = userData?['driver']?['license_number'] ?? userData?['license_number'];
+    final dlNumber =
+        userData?['driver']?['license_number'] ?? userData?['license_number'];
 
-    if (dlNumber == null) return {'success': false, 'error': 'Driver license not found'};
+    if (dlNumber == null)
+      return {'success': false, 'error': 'Driver license not found'};
 
-    final vId = account['vendor_id']?.toString() ?? account['vendor']?['id']?.toString();
-    final tId = account['tenant_id']?.toString() ?? account['tenant']?['id']?.toString();
+    final vId =
+        account['vendor_id']?.toString() ??
+        account['vendor']?['id']?.toString();
+    final tId =
+        account['tenant_id']?.toString() ??
+        account['tenant']?['id']?.toString();
 
-    if (vId == null || tId == null) return {'success': false, 'error': 'Invalid account data'};
+    if (vId == null || tId == null)
+      return {'success': false, 'error': 'Invalid account data'};
 
     final deviceData = await _deviceService.getDeviceData();
 
     try {
       final result = await _authService.selectTenant(
-        dlNumber:   dlNumber,
+        dlNumber: dlNumber,
         deviceData: deviceData,
-        vendorId:   vId,
-        tenantId:   tId,
+        vendorId: vId,
+        tenantId: tId,
       );
 
       if (result['success'] == true) {
@@ -363,7 +396,7 @@ class AuthProvider extends ChangeNotifier {
     await _sessionService.clearTempSession();
 
     _currentUser = null;
-    _status      = AuthStatus.unauthenticated;
+    _status = AuthStatus.unauthenticated;
 
     notifyListeners();
   }

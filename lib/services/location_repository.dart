@@ -6,6 +6,7 @@ import 'package:logger/logger.dart';
 import 'location_service.dart';
 import 'route_service.dart';
 import 'driver_config_service.dart';
+import 'package:dio/dio.dart';
 
 class QueuedLocation {
   final String routeId;
@@ -23,20 +24,22 @@ class QueuedLocation {
   });
 
   Map<String, dynamic> toJson() => {
-        'routeId': routeId,
-        'latitude': latitude,
-        'longitude': longitude,
-        'speedKmh': speedKmh,
-        'timestamp': timestamp,
-      };
+    'routeId': routeId,
+    'latitude': latitude,
+    'longitude': longitude,
+    'speedKmh': speedKmh,
+    'timestamp': timestamp,
+  };
 
   factory QueuedLocation.fromJson(Map<String, dynamic> json) => QueuedLocation(
-        routeId: json['routeId'] as String,
-        latitude: (json['latitude'] as num).toDouble(),
-        longitude: (json['longitude'] as num).toDouble(),
-        speedKmh: json['speedKmh'] != null ? (json['speedKmh'] as num).toDouble() : null,
-        timestamp: json['timestamp'] as int,
-      );
+    routeId: json['routeId'] as String,
+    latitude: (json['latitude'] as num).toDouble(),
+    longitude: (json['longitude'] as num).toDouble(),
+    speedKmh: json['speedKmh'] != null
+        ? (json['speedKmh'] as num).toDouble()
+        : null,
+    timestamp: json['timestamp'] as int,
+  );
 }
 
 class LocationRepository {
@@ -70,7 +73,9 @@ class LocationRepository {
         _logger.w('⚠️ LocationRepository: error in positionStream: $e');
       },
     );
-    _logger.i('✅ LocationRepository: Subscribed to LocationService positionStream');
+    _logger.i(
+      '✅ LocationRepository: Subscribed to LocationService positionStream',
+    );
   }
 
   void _handleNewPosition(Position position) {
@@ -90,9 +95,11 @@ class LocationRepository {
       _lastUploadTime = now;
       final speedKmh = position.speed < 0 ? null : position.speed * 3.6;
 
-      _logger.i('📍 GPS trigger: Queueing location for route: $routeId '
-          '(${position.latitude.toStringAsFixed(5)}, ${position.longitude.toStringAsFixed(5)}) '
-          'at dynamic interval: ${intervalSeconds}s');
+      _logger.i(
+        '📍 GPS trigger: Queueing location for route: $routeId '
+        '(${position.latitude.toStringAsFixed(5)}, ${position.longitude.toStringAsFixed(5)}) '
+        'at dynamic interval: ${intervalSeconds}s',
+      );
 
       queueLocation(
         routeId: routeId,
@@ -146,7 +153,9 @@ class LocationRepository {
         return;
       }
 
-      _logger.i('📤 Processing offline location queue with ${rawQueue.length} items...');
+      _logger.i(
+        '📤 Processing offline location queue with ${rawQueue.length} items...',
+      );
       final List<String> remainingItems = [];
       bool stopProcessing = false;
 
@@ -165,17 +174,34 @@ class LocationRepository {
         }
 
         try {
+          // Never upload points persisted for a previous active route.
+          if (loc.routeId != LocationService().activeRouteId) {
+            _logger.i(
+              'Dropping queued location for stale route ${loc.routeId}',
+            );
+            continue;
+          }
           await _routeService.sendLocation(
             routeId: loc.routeId,
             latitude: loc.latitude,
             longitude: loc.longitude,
             speedKmh: loc.speedKmh,
           );
-          _logger.i('✅ Location upload succeeded: (${loc.latitude}, ${loc.longitude}) for route ${loc.routeId}');
+          _logger.i(
+            '✅ Location upload succeeded: (${loc.latitude}, ${loc.longitude}) for route ${loc.routeId}',
+          );
         } catch (e) {
+          if (_isRouteNotOngoing(e)) {
+            _logger.w(
+              'Route ${loc.routeId} is no longer ongoing; dropping queued location',
+            );
+            unawaited(LocationService().refreshActiveRoute());
+            continue;
+          }
           _logger.w('⚠️ Location upload failed: $e. Retaining in queue.');
           remainingItems.add(itemStr);
-          stopProcessing = true; // Stop processing subsequent items to maintain order
+          stopProcessing =
+              true; // Stop processing subsequent items to maintain order
         }
       }
 
@@ -185,6 +211,18 @@ class LocationRepository {
     } finally {
       _isProcessing = false;
     }
+  }
+
+  bool _isRouteNotOngoing(Object error) {
+    if (error is! DioException) return false;
+    final data = error.response?.data;
+    if (data is Map) {
+      final code = data['code'] ?? data['error_code'];
+      if (code?.toString().toUpperCase() == 'ROUTE_NOT_ONGOING') return true;
+      if (data.toString().toUpperCase().contains('ROUTE_NOT_ONGOING'))
+        return true;
+    }
+    return error.message?.toUpperCase().contains('ROUTE_NOT_ONGOING') ?? false;
   }
 
   void _startQueueProcessor() {

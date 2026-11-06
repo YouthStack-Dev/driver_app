@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -10,25 +11,27 @@ import '../services/permission_service.dart';
 import '../widgets/app_drawer.dart';
 import '../services/driver_config_service.dart';
 import '../services/session_service.dart';
+import '../models/driver_current_state.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'chat_screen.dart';
+
 // ─── Light Theme Color Tokens ────────────────────────────────────────────────
 class _C {
-  static const bg         = Color(0xFFF4F6FA);   // Page background
-  static const border     = Color(0xFFE8ECF4);    // Dividers / borders
-  static const textPrimary   = Color(0xFF111827); // Dark headings
+  static const bg = Color(0xFFF4F6FA); // Page background
+  static const border = Color(0xFFE8ECF4); // Dividers / borders
+  static const textPrimary = Color(0xFF111827); // Dark headings
   static const textSecondary = Color(0xFF6B7280); // Sub-labels
-  static const blue       = Color(0xFF1E6BFF);    // Primary blue
-  static const blueBg     = Color(0xFFECF2FF);    // Blue tint
-  static const green      = Color(0xFF16A34A);    // Success green
-  static const greenBg    = Color(0xFFDCFCE7);
-  static const amber      = Color(0xFFF59E0B);    // ETA / time
-  static const amberBg    = Color(0xFFFFFBEB);
-  static const red        = Color(0xFFDC2626);    // No Show / End Duty
-  static const redBg      = Color(0xFFFEF2F2);
-  static const teal       = Color(0xFF0D9488);    // Navigate button
-  static const tealBg     = Color(0xFFCCFBF1);
-  static const purple     = Color(0xFF7C3AED);    // Board button
+  static const blue = Color(0xFF1E6BFF); // Primary blue
+  static const blueBg = Color(0xFFECF2FF); // Blue tint
+  static const green = Color(0xFF16A34A); // Success green
+  static const greenBg = Color(0xFFDCFCE7);
+  static const amber = Color(0xFFF59E0B); // ETA / time
+  static const amberBg = Color(0xFFFFFBEB);
+  static const red = Color(0xFFDC2626); // No Show / End Duty
+  static const redBg = Color(0xFFFEF2F2);
+  static const teal = Color(0xFF0D9488); // Navigate button
+  static const tealBg = Color(0xFFCCFBF1);
+  static const purple = Color(0xFF7C3AED); // Board button
 }
 
 class RidesScreen extends StatefulWidget {
@@ -41,6 +44,7 @@ class RidesScreen extends StatefulWidget {
 
 class _RidesScreenState extends State<RidesScreen> {
   final Map<dynamic, bool> _collapsedRoutes = {};
+  Timer? _currentStateTimer;
 
   @override
   void initState() {
@@ -55,8 +59,22 @@ class _RidesScreenState extends State<RidesScreen> {
       if (!mounted) return;
       final provider = Provider.of<BookingProvider>(context, listen: false);
       provider.clearData();
-      _fetchRoutes();
+      await _fetchRoutes();
+      _currentStateTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+        if (mounted) {
+          Provider.of<BookingProvider>(
+            context,
+            listen: false,
+          ).refreshCurrentState();
+        }
+      });
     });
+  }
+
+  @override
+  void dispose() {
+    _currentStateTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _fetchRoutes() async {
@@ -67,14 +85,17 @@ class _RidesScreenState extends State<RidesScreen> {
     if (provider.routes.isEmpty) {
       await provider.fetchTrips(status: 'upcoming');
     }
+    await provider.refreshCurrentState();
   }
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.white,
-      statusBarIconBrightness: Brightness.dark,
-    ));
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.white,
+        statusBarIconBrightness: Brightness.dark,
+      ),
+    );
     final provider = Provider.of<BookingProvider>(context);
 
     return Scaffold(
@@ -86,7 +107,12 @@ class _RidesScreenState extends State<RidesScreen> {
           return Stack(
             children: [
               provider.isLoading
-                  ? const Center(child: CircularProgressIndicator(color: _C.blue, strokeWidth: 2.5))
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: _C.blue,
+                        strokeWidth: 2.5,
+                      ),
+                    )
                   : RefreshIndicator(
                       onRefresh: _fetchRoutes,
                       color: _C.blue,
@@ -95,6 +121,7 @@ class _RidesScreenState extends State<RidesScreen> {
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
                         children: [
+                          _buildCurrentStateCard(provider),
                           if (provider.error != null && provider.routes.isEmpty)
                             _buildErrorState(provider.error!)
                           else if (provider.routes.isEmpty)
@@ -102,14 +129,19 @@ class _RidesScreenState extends State<RidesScreen> {
                           else
                             AnimationLimiter(
                               child: Column(
-                                children: provider.routes.asMap().entries.map((entry) {
+                                children: provider.routes.asMap().entries.map((
+                                  entry,
+                                ) {
                                   return AnimationConfiguration.staggeredList(
                                     position: entry.key,
                                     duration: const Duration(milliseconds: 350),
                                     child: SlideAnimation(
                                       verticalOffset: 40.0,
                                       child: FadeInAnimation(
-                                        child: _buildRouteCard(entry.value, provider),
+                                        child: _buildRouteCard(
+                                          entry.value,
+                                          provider,
+                                        ),
                                       ),
                                     ),
                                   );
@@ -129,7 +161,8 @@ class _RidesScreenState extends State<RidesScreen> {
                   child: _buildGpsWarningBanner(),
                 ),
               // Speed-limit violation banner
-              if (locationProvider.isTracking && locationProvider.isSpeedLimitExceeded)
+              if (locationProvider.isTracking &&
+                  locationProvider.isSpeedLimitExceeded)
                 Positioned(
                   top: 8,
                   left: 16,
@@ -146,6 +179,200 @@ class _RidesScreenState extends State<RidesScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildCurrentStateCard(BookingProvider provider) {
+    final state = provider.currentState;
+    if (state == null) return const SizedBox.shrink();
+
+    final isOperational = state.dutyStatus == 'ON_DUTY';
+    final stop = state.currentStop;
+    final phaseLabel = state.phase == 'TRAVEL_TO_DROP'
+        ? 'Travelling to drop'
+        : 'Going to pickup';
+    final isDrop = state.phase == 'TRAVEL_TO_DROP';
+    final address = stop == null
+        ? null
+        : (isDrop ? stop.dropLocation : stop.pickupLocation);
+    final lat = stop == null
+        ? null
+        : (isDrop ? stop.dropLatitude : stop.pickupLatitude);
+    final lng = stop == null
+        ? null
+        : (isDrop ? stop.dropLongitude : stop.pickupLongitude);
+    final eta = stop?.displayEtaFor(state.route?.logType);
+    final etaText = eta == null || eta.isEmpty ? null : _formatTime(eta);
+    final etaNote = stop?.isApproximateEta == true
+        ? 'Approximate ETA'
+        : stop?.isEtaDelayed == true
+        ? 'ETA may be delayed'
+        : null;
+
+    String title;
+    String subtitle;
+    Color color;
+    if (state.dutyStatus == 'NOT_ON_DUTY') {
+      title = 'No active duty';
+      subtitle = 'You are available for a new assignment.';
+      color = _C.textSecondary;
+    } else if (state.dutyStatus == 'DUTY_ASSIGNED') {
+      title = 'Duty assigned';
+      subtitle = 'Start duty from the assigned route below.';
+      color = _C.blue;
+    } else if (state.dutyStatus == 'COMPLETED') {
+      title = 'Duty completed';
+      subtitle = 'Your latest duty has been completed.';
+      color = _C.green;
+    } else {
+      title = phaseLabel;
+      subtitle = stop?.employeeName ?? 'Active duty';
+      color = _C.teal;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isOperational ? Icons.navigation_rounded : Icons.info_outline,
+                color: color,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: _C.textPrimary,
+                  ),
+                ),
+              ),
+              if (state.driverLocation?.isGpsFresh == false)
+                Text(
+                  'GPS stale',
+                  style: GoogleFonts.poppins(
+                    color: _C.amber,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            style: GoogleFonts.poppins(color: _C.textSecondary, fontSize: 11),
+          ),
+          if (isOperational && stop != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              address ?? 'Location unavailable',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                color: _C.textPrimary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                if (etaText != null) _stateChip('ETA $etaText'),
+                if (etaNote != null) _stateChip(etaNote, amber: true),
+                if (state.arrivalProximity?.distanceMeters != null)
+                  _stateChip(
+                    '${state.arrivalProximity!.distanceMeters!.round()} m away',
+                  ),
+                _stateChip('${state.employeesOnboard.length} onboard'),
+                if (state.driverLocation?.speed != null)
+                  _stateChip(
+                    '${state.driverLocation!.speed!.toStringAsFixed(0)} km/h',
+                  ),
+              ],
+            ),
+            if (state.nextStop != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Next: ${state.nextStop!.employeeName ?? 'Employee'}'
+                '${state.nextStop!.pickupLocation == null ? '' : ' - ${state.nextStop!.pickupLocation}'}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  color: _C.textSecondary,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+            if (state.arrivalProximity?.isNearPickup == true ||
+                state.arrivalProximity?.isNearDrop == true)
+              Padding(
+                padding: const EdgeInsets.only(top: 7),
+                child: Text(
+                  'Near ${isDrop ? 'drop' : 'pickup'}',
+                  style: GoogleFonts.poppins(
+                    color: _C.green,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            if (lat != null && lng != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => _openExternalMap(lat, lng, address),
+                  icon: const Icon(
+                    Icons.directions_rounded,
+                    size: 15,
+                    color: _C.teal,
+                  ),
+                  label: Text(
+                    'Navigate',
+                    style: GoogleFonts.poppins(
+                      color: _C.teal,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _stateChip(String text, {bool amber = false}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: amber ? _C.amberBg : _C.blueBg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: GoogleFonts.poppins(
+          color: amber ? _C.amber : _C.blue,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
@@ -176,7 +403,11 @@ class _RidesScreenState extends State<RidesScreen> {
             Text(
               "Today's Ride",
               style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.bold, color: _C.textPrimary, fontSize: 17, height: 1.2),
+                fontWeight: FontWeight.bold,
+                color: _C.textPrimary,
+                fontSize: 17,
+                height: 1.2,
+              ),
             ),
           ],
         ),
@@ -191,18 +422,25 @@ class _RidesScreenState extends State<RidesScreen> {
   Widget _buildGreetingArea() {
     final auth = Provider.of<AuthProvider>(context);
     final accounts = auth.accounts;
-    
+
     Widget greetingText = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           _greeting(),
           style: GoogleFonts.poppins(
-              color: _C.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
+            color: _C.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
         ),
         if (accounts.length > 1) ...[
           const SizedBox(width: 4),
-          const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: _C.textSecondary),
+          const Icon(
+            Icons.keyboard_arrow_down_rounded,
+            size: 14,
+            color: _C.textSecondary,
+          ),
         ],
       ],
     );
@@ -218,30 +456,44 @@ class _RidesScreenState extends State<RidesScreen> {
       child: greetingText,
       onSelected: (account) async {
         final currentKey = '${auth.vendorId ?? ''}:${auth.tenantId ?? ''}';
-        final newKey = '${account['vendor_id'] ?? account['vendor']?['id'] ?? ''}:${account['tenant_id'] ?? account['tenant']?['id'] ?? ''}';
+        final newKey =
+            '${account['vendor_id'] ?? account['vendor']?['id'] ?? ''}:${account['tenant_id'] ?? account['tenant']?['id'] ?? ''}';
         if (currentKey == newKey) return;
-        
-        showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator(color: _C.blue)));
+
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) =>
+              const Center(child: CircularProgressIndicator(color: _C.blue)),
+        );
         final result = await auth.switchCompany(account);
         if (mounted) Navigator.pop(context);
 
         if (result['success'] == true) {
-           _fetchRoutes();
+          _fetchRoutes();
         } else {
-           if (mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['error'] ?? 'Failed to switch')));
-           }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(result['error'] ?? 'Failed to switch')),
+            );
+          }
         }
       },
       itemBuilder: (BuildContext context) {
         return accounts.map((account) {
-          final vendorName = account['vendor_name'] ?? account['vendor']?['name'] ?? 'Unknown';
-          final tenantName = account['tenant_name'] ?? account['tenant']?['name'] ?? 'Unknown';
-          final vendorId = account['vendor_id']?.toString() ?? account['vendor']?['id']?.toString();
-          final tenantId = account['tenant_id']?.toString() ?? account['tenant']?['id']?.toString();
+          final vendorName =
+              account['vendor_name'] ?? account['vendor']?['name'] ?? 'Unknown';
+          final tenantName =
+              account['tenant_name'] ?? account['tenant']?['name'] ?? 'Unknown';
+          final vendorId =
+              account['vendor_id']?.toString() ??
+              account['vendor']?['id']?.toString();
+          final tenantId =
+              account['tenant_id']?.toString() ??
+              account['tenant']?['id']?.toString();
           final key = '${vendorId ?? ''}:${tenantId ?? ''}';
           final currentKey = '${auth.vendorId ?? ''}:${auth.tenantId ?? ''}';
-          
+
           return PopupMenuItem<Map<String, dynamic>>(
             value: account,
             child: Row(
@@ -251,13 +503,31 @@ class _RidesScreenState extends State<RidesScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(vendorName, style: GoogleFonts.poppins(fontSize: 13, fontWeight: key == currentKey ? FontWeight.bold : FontWeight.w500)),
-                      Text(tenantName, style: GoogleFonts.poppins(fontSize: 10, color: _C.textSecondary)),
+                      Text(
+                        vendorName,
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: key == currentKey
+                              ? FontWeight.bold
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        tenantName,
+                        style: GoogleFonts.poppins(
+                          fontSize: 10,
+                          color: _C.textSecondary,
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 if (key == currentKey)
-                  const Icon(Icons.check_circle_rounded, color: _C.green, size: 16),
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    color: _C.green,
+                    size: 16,
+                  ),
               ],
             ),
           );
@@ -277,7 +547,11 @@ class _RidesScreenState extends State<RidesScreen> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: _C.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 12, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -285,17 +559,30 @@ class _RidesScreenState extends State<RidesScreen> {
           Container(
             width: 72,
             height: 72,
-            decoration: const BoxDecoration(color: _C.blueBg, shape: BoxShape.circle),
+            decoration: const BoxDecoration(
+              color: _C.blueBg,
+              shape: BoxShape.circle,
+            ),
             child: const Icon(Icons.map_outlined, color: _C.blue, size: 32),
           ),
           const SizedBox(height: 18),
-          Text('No upcoming routes',
-              style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: _C.textPrimary)),
+          Text(
+            'No upcoming routes',
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: _C.textPrimary,
+            ),
+          ),
           const SizedBox(height: 8),
           Text(
             'Your assigned routes and schedules for today will appear here.',
             textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(color: _C.textSecondary, fontSize: 13, height: 1.5),
+            style: GoogleFonts.poppins(
+              color: _C.textSecondary,
+              fontSize: 13,
+              height: 1.5,
+            ),
           ),
         ],
       ),
@@ -315,27 +602,55 @@ class _RidesScreenState extends State<RidesScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: const BoxDecoration(color: _C.redBg, shape: BoxShape.circle),
-            child: const Icon(Icons.error_outline_rounded, color: _C.red, size: 32),
+            decoration: const BoxDecoration(
+              color: _C.redBg,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.error_outline_rounded,
+              color: _C.red,
+              size: 32,
+            ),
           ),
           const SizedBox(height: 16),
-          Text('Failed to load routes',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16, color: _C.textPrimary)),
+          Text(
+            'Failed to load routes',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: _C.textPrimary,
+            ),
+          ),
           const SizedBox(height: 8),
-          Text(error, textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 13, color: _C.textSecondary)),
+          Text(
+            error,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(fontSize: 13, color: _C.textSecondary),
+          ),
           const SizedBox(height: 20),
           ElevatedButton.icon(
             onPressed: _fetchRoutes,
-            icon: const Icon(Icons.replay_rounded, size: 18, color: Colors.white),
-            label: Text('Retry', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.white)),
+            icon: const Icon(
+              Icons.replay_rounded,
+              size: 18,
+              color: Colors.white,
+            ),
+            label: Text(
+              'Retry',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: _C.blue,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               elevation: 0,
             ),
-          )
+          ),
         ],
       ),
     );
@@ -349,7 +664,13 @@ class _RidesScreenState extends State<RidesScreen> {
         color: _C.amberBg,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: _C.amber.withValues(alpha: 0.4)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -357,18 +678,37 @@ class _RidesScreenState extends State<RidesScreen> {
           children: [
             Container(
               padding: const EdgeInsets.all(7),
-              decoration: const BoxDecoration(color: Color(0xFFFEF3C7), shape: BoxShape.circle),
-              child: const Icon(Icons.location_off_rounded, color: _C.amber, size: 18),
+              decoration: const BoxDecoration(
+                color: Color(0xFFFEF3C7),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.location_off_rounded,
+                color: _C.amber,
+                size: 18,
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('GPS Disabled',
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Color(0xFF92400E), fontSize: 12.5)),
-                  Text('Enable location to track route progress.',
-                      style: GoogleFonts.poppins(color: Color(0xFF92400E), fontSize: 11, fontWeight: FontWeight.w500)),
+                  Text(
+                    'GPS Disabled',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF92400E),
+                      fontSize: 12.5,
+                    ),
+                  ),
+                  Text(
+                    'Enable location to track route progress.',
+                    style: GoogleFonts.poppins(
+                      color: Color(0xFF92400E),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -378,11 +718,22 @@ class _RidesScreenState extends State<RidesScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _C.amber,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 elevation: 0,
               ),
-              child: Text('Settings', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold)),
+              child: Text(
+                'Settings',
+                style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         ),
@@ -393,15 +744,35 @@ class _RidesScreenState extends State<RidesScreen> {
   // ─── Route Card ─────────────────────────────────────────────────────────────
 
   Widget _buildRouteCard(dynamic route, BookingProvider provider) {
-
-    final bool isOngoing  = route['status'] == 'Ongoing';
-    final bool isAssigned = route['status'] == 'Driver Assigned';
-    final stops     = route['stops'] as List? ?? [];
-    final routeId   = route['route_id'];
-    final logType   = route['log_type'] ?? 'IN';
+    final stops = route['stops'] as List? ?? [];
+    final routeId = route['route_id'];
+    final currentState = provider.currentState;
+    final isCurrentStateRoute =
+        currentState?.route?.routeId?.toString() == routeId?.toString();
+    final bool isOngoing = currentState != null
+        ? isCurrentStateRoute && currentState.dutyStatus == 'ON_DUTY'
+        : route['status'] == 'Ongoing';
+    final bool isAssigned = currentState != null
+        ? isCurrentStateRoute && currentState.dutyStatus == 'DUTY_ASSIGNED'
+        : route['status'] == 'Driver Assigned';
+    if (currentState != null) {
+      route = {
+        ...route,
+        'status': isOngoing
+            ? 'Ongoing'
+            : isAssigned
+            ? 'Driver Assigned'
+            : 'Completed',
+      };
+    }
+    final logType = route['log_type'] ?? 'IN';
     final shiftTime = route['shift_time'] ?? 'N/A';
-    final bool hasEscort     = route['assigned_escort_id'] != null || route['has_escort'] == true || route['escort_required'] == true;
-    final bool escortBoarded = route['escort_boarded'] == true || route['escort_status'] == 'Boarded';
+    final bool hasEscort =
+        route['assigned_escort_id'] != null ||
+        route['has_escort'] == true ||
+        route['escort_required'] == true;
+    final bool escortBoarded =
+        route['escort_boarded'] == true || route['escort_status'] == 'Boarded';
     final bool showEscortBoard = isOngoing && hasEscort && !escortBoarded;
 
     final bool isCollapsed = _collapsedRoutes[routeId] ?? false;
@@ -413,7 +784,11 @@ class _RidesScreenState extends State<RidesScreen> {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: _C.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 16, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -430,7 +805,9 @@ class _RidesScreenState extends State<RidesScreen> {
               topLeft: const Radius.circular(18),
               topRight: const Radius.circular(18),
               bottomLeft: isCollapsed ? const Radius.circular(18) : Radius.zero,
-              bottomRight: isCollapsed ? const Radius.circular(18) : Radius.zero,
+              bottomRight: isCollapsed
+                  ? const Radius.circular(18)
+                  : Radius.zero,
             ),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
@@ -445,7 +822,11 @@ class _RidesScreenState extends State<RidesScreen> {
                       color: _C.blueBg,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.alt_route_rounded, color: _C.blue, size: 26),
+                    child: const Icon(
+                      Icons.alt_route_rounded,
+                      color: _C.blue,
+                      size: 26,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -457,11 +838,19 @@ class _RidesScreenState extends State<RidesScreen> {
                             Text(
                               'Route #$routeId',
                               style: GoogleFonts.poppins(
-                                  fontWeight: FontWeight.w800, fontSize: 16, color: _C.textPrimary),
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                                color: _C.textPrimary,
+                              ),
                             ),
                             if (hasEscort) ...[
                               const SizedBox(width: 6),
-                              _buildChip('ESCORT', _C.tealBg, _C.teal, icon: Icons.security_rounded),
+                              _buildChip(
+                                'ESCORT',
+                                _C.tealBg,
+                                _C.teal,
+                                icon: Icons.security_rounded,
+                              ),
                             ],
                           ],
                         ),
@@ -471,14 +860,23 @@ class _RidesScreenState extends State<RidesScreen> {
                             _buildChip(
                               logType == 'IN' ? 'Pickup' : 'Drop',
                               logType == 'IN' ? _C.greenBg : _C.amberBg,
-                              logType == 'IN' ? _C.green   : _C.amber,
+                              logType == 'IN' ? _C.green : _C.amber,
                             ),
                             const SizedBox(width: 8),
-                            const Icon(Icons.access_time_rounded, size: 13, color: _C.textSecondary),
+                            const Icon(
+                              Icons.access_time_rounded,
+                              size: 13,
+                              color: _C.textSecondary,
+                            ),
                             const SizedBox(width: 3),
-                            Text(shiftTime,
-                                style: GoogleFonts.poppins(
-                                    color: _C.textSecondary, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                            Text(
+                              shiftTime,
+                              style: GoogleFonts.poppins(
+                                color: _C.textSecondary,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ],
                         ),
                       ],
@@ -494,7 +892,9 @@ class _RidesScreenState extends State<RidesScreen> {
                         _buildChip('ASSIGNED', _C.blueBg, _C.blue, dot: true),
                       const SizedBox(width: 6),
                       Icon(
-                        isCollapsed ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
+                        isCollapsed
+                            ? Icons.keyboard_arrow_down_rounded
+                            : Icons.keyboard_arrow_up_rounded,
                         color: _C.textSecondary,
                         size: 22,
                       ),
@@ -510,27 +910,48 @@ class _RidesScreenState extends State<RidesScreen> {
             Container(
               decoration: BoxDecoration(
                 color: _C.bg,
-                border: Border.symmetric(horizontal: BorderSide(color: _C.border)),
+                border: Border.symmetric(
+                  horizontal: BorderSide(color: _C.border),
+                ),
               ),
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
               child: Row(
                 children: [
                   Builder(
                     builder: (context) {
-                      int currentIdx = stops.indexWhere((s) => s['status'] == 'Scheduled');
+                      int currentIdx = stops.indexWhere(
+                        (s) => s['status'] == 'Scheduled',
+                      );
                       if (currentIdx == -1) {
-                        currentIdx = stops.indexWhere((s) => s['status'] == 'Ongoing');
+                        currentIdx = stops.indexWhere(
+                          (s) => s['status'] == 'Ongoing',
+                        );
                       }
-                      final displayIdx = currentIdx == -1 ? stops.length : currentIdx + 1;
-                      return _buildSummaryStatPill(Icons.place_rounded, '$displayIdx/${stops.length}', 'Stops', _C.purple);
+                      final displayIdx = currentIdx == -1
+                          ? stops.length
+                          : currentIdx + 1;
+                      return _buildSummaryStatPill(
+                        Icons.place_rounded,
+                        '$displayIdx/${stops.length}',
+                        'Stops',
+                        _C.purple,
+                      );
                     },
                   ),
                   const SizedBox(width: 10),
-                  _buildSummaryStatPill(Icons.route_rounded,
-                      '${(route['actual_total_distance'] ?? route['estimated_total_distance'] ?? route['actual_distance_km'] ?? route['estimated_distance_km'] ?? route['summary']?['total_distance_km'] ?? 0).toDouble().toStringAsFixed(1)} km', 'Distance', _C.green),
+                  _buildSummaryStatPill(
+                    Icons.route_rounded,
+                    '${(route['actual_total_distance'] ?? route['estimated_total_distance'] ?? route['actual_distance_km'] ?? route['estimated_distance_km'] ?? route['summary']?['total_distance_km'] ?? 0).toDouble().toStringAsFixed(1)} km',
+                    'Distance',
+                    _C.green,
+                  ),
                   const SizedBox(width: 10),
-                  _buildSummaryStatPill(Icons.timer_rounded,
-                      '${(route['actual_total_time'] ?? route['estimated_total_time'] ?? route['summary']?['total_time_minutes'] ?? 0).toDouble().round()} min', 'ETA', _C.amber),
+                  _buildSummaryStatPill(
+                    Icons.timer_rounded,
+                    '${(route['actual_total_time'] ?? route['estimated_total_time'] ?? route['summary']?['total_time_minutes'] ?? 0).toDouble().round()} min',
+                    'ETA',
+                    _C.amber,
+                  ),
                 ],
               ),
             ),
@@ -538,11 +959,20 @@ class _RidesScreenState extends State<RidesScreen> {
             // ── Escort Info ───────────────────────────────────────────────
             Builder(
               builder: (context) {
-                final escortName = route['escort_name']?.toString() ?? route['assigned_escort']?['name']?.toString() ?? route['assigned_escort']?['employee_name']?.toString();
-                final escortPhone = route['escort_phone']?.toString() ?? route['assigned_escort']?['phone']?.toString() ?? route['assigned_escort']?['phone_number']?.toString();
-                
+                final escortName =
+                    route['escort_name']?.toString() ??
+                    route['assigned_escort']?['name']?.toString() ??
+                    route['assigned_escort']?['employee_name']?.toString();
+                final escortPhone =
+                    route['escort_phone']?.toString() ??
+                    route['assigned_escort']?['phone']?.toString() ??
+                    route['assigned_escort']?['phone_number']?.toString();
+
                 if (hasEscort) {
-                  final displayName = (escortName != null && escortName.isNotEmpty) ? escortName : 'Security Escort';
+                  final displayName =
+                      (escortName != null && escortName.isNotEmpty)
+                      ? escortName
+                      : 'Security Escort';
                   return Container(
                     decoration: BoxDecoration(
                       color: showEscortBoard
@@ -550,7 +980,10 @@ class _RidesScreenState extends State<RidesScreen> {
                           : _C.tealBg.withValues(alpha: 0.2),
                       border: Border(bottom: BorderSide(color: _C.border)),
                     ),
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 12,
+                    ),
                     child: Row(
                       children: [
                         Container(
@@ -572,10 +1005,16 @@ class _RidesScreenState extends State<RidesScreen> {
                             children: [
                               Text(
                                 displayName,
-                                style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 14, color: _C.textPrimary),
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: _C.textPrimary,
+                                ),
                               ),
                               Text(
-                                showEscortBoard ? 'Board escort before starting stops' : 'Escort Boarded ✓',
+                                showEscortBoard
+                                    ? 'Board escort before starting stops'
+                                    : 'Escort Boarded ✓',
                                 style: GoogleFonts.poppins(
                                   fontSize: 11.5,
                                   color: showEscortBoard ? _C.amber : _C.teal,
@@ -604,8 +1043,7 @@ class _RidesScreenState extends State<RidesScreen> {
             ),
 
             // ── Escort Gate: block stops until escort is boarded ──────────
-            if (showEscortBoard)
-              _buildEscortGate(route, provider),
+            if (showEscortBoard) _buildEscortGate(route, provider),
             if (stops.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
@@ -615,7 +1053,9 @@ class _RidesScreenState extends State<RidesScreen> {
                     () {
                       final logType = route['log_type'] ?? 'IN';
                       final bool isLogout = logType == 'OUT';
-                      final bool hasScheduled = stops.any((s) => s['status'] == 'Scheduled');
+                      final bool hasScheduled = stops.any(
+                        (s) => s['status'] == 'Scheduled',
+                      );
 
                       if (isLogout && hasScheduled) {
                         // ─── LOGOUT BOARDING PHASE ───
@@ -625,14 +1065,18 @@ class _RidesScreenState extends State<RidesScreen> {
                           children: [
                             _buildSectionHeader(
                               'BOARD PASSENGERS (${stops.length})',
-                              subtitle: 'Tap Board on each employee to board them',
+                              subtitle:
+                                  'Tap Board on each employee to board them',
                             ),
                             const SizedBox(height: 10),
                             () {
                               final firstStop = stops.first;
-                              final double? officeLat = firstStop['pickup_latitude'];
-                              final double? officeLng = firstStop['pickup_longitude'];
-                              final String officeAddress = firstStop['pickup_location'] ?? 'Office';
+                              final double? officeLat =
+                                  firstStop['pickup_latitude'];
+                              final double? officeLng =
+                                  firstStop['pickup_longitude'];
+                              final String officeAddress =
+                                  firstStop['pickup_location'] ?? 'Office';
                               if (officeLat != null && officeLng != null) {
                                 return Padding(
                                   padding: const EdgeInsets.only(bottom: 12),
@@ -642,22 +1086,40 @@ class _RidesScreenState extends State<RidesScreen> {
                                       borderRadius: BorderRadius.circular(14),
                                       border: Border.all(color: _C.border),
                                     ),
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
                                     child: Row(
                                       children: [
-                                        const Icon(Icons.location_on_rounded, color: _C.blue, size: 20),
+                                        const Icon(
+                                          Icons.location_on_rounded,
+                                          color: _C.blue,
+                                          size: 20,
+                                        ),
                                         const SizedBox(width: 8),
                                         Expanded(
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
-                                              Text('Pickup Location (Office)',
-                                                  style: GoogleFonts.poppins(
-                                                      fontWeight: FontWeight.bold, fontSize: 13, color: _C.textPrimary)),
-                                              Text(officeAddress,
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: GoogleFonts.poppins(fontSize: 11, color: _C.textSecondary)),
+                                              Text(
+                                                'Pickup Location (Office)',
+                                                style: GoogleFonts.poppins(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 13,
+                                                  color: _C.textPrimary,
+                                                ),
+                                              ),
+                                              Text(
+                                                officeAddress,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 11,
+                                                  color: _C.textSecondary,
+                                                ),
+                                              ),
                                             ],
                                           ),
                                         ),
@@ -666,7 +1128,11 @@ class _RidesScreenState extends State<RidesScreen> {
                                           icon: Icons.directions_rounded,
                                           color: _C.teal,
                                           bg: _C.tealBg,
-                                          onTap: () => _openExternalMap(officeLat, officeLng, officeAddress),
+                                          onTap: () => _openExternalMap(
+                                            officeLat,
+                                            officeLng,
+                                            officeAddress,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -680,7 +1146,12 @@ class _RidesScreenState extends State<RidesScreen> {
                               final stop = e.value;
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
-                                child: _buildLogoutBoardCard(stop, route, provider, index),
+                                child: _buildLogoutBoardCard(
+                                  stop,
+                                  route,
+                                  provider,
+                                  index,
+                                ),
                               );
                             }),
                           ],
@@ -690,25 +1161,38 @@ class _RidesScreenState extends State<RidesScreen> {
                       // ─── LOGIN SHIFT OR LOGOUT DROP-OFF PHASE ───
                       // Sequential stops processing:
                       // First look for any Scheduled stop (boarding phase)
-                      int currentIdx = stops.indexWhere((s) => s['status'] == 'Scheduled');
-                      // If no Scheduled stops are left, look for the first Ongoing stop (drop-off phase)
-                      if (currentIdx == -1) {
-                        currentIdx = stops.indexWhere((s) => s['status'] == 'Ongoing');
+                      final stateForRoute = isCurrentStateRoute
+                          ? currentState
+                          : null;
+                      final backendCurrentStop = stateForRoute?.currentStop;
+                      int currentIdx = findBackendStopIndex(
+                        stops,
+                        backendCurrentStop,
+                      );
+
+                      // The current-state API is authoritative when it
+                      // supplies a current stop. Legacy selection remains
+                      // only for routes/states without that information.
+                      if (backendCurrentStop == null) {
+                        currentIdx = stops.indexWhere(
+                          (s) => s['status'] == 'Scheduled',
+                        );
+                        if (currentIdx == -1) {
+                          currentIdx = stops.indexWhere(
+                            (s) => s['status'] == 'Ongoing',
+                          );
+                        }
                       }
 
-                      final upcomingStops = stops
-                          .asMap()
-                          .entries
-                          .where((e) {
-                            if (e.key == currentIdx) return false;
-                            final s = e.value['status'];
-                            if (logType == 'IN') {
-                              return s == 'Scheduled';
-                            } else {
-                              return s == 'Ongoing';
-                            }
-                          })
-                          .toList();
+                      final upcomingIndices = selectUpcomingStopIndices(
+                        stops: stops,
+                        logType: logType,
+                        currentIndex: currentIdx,
+                        backendNextStop: stateForRoute?.nextStop,
+                        hasBackendState:
+                            stateForRoute?.currentStop != null ||
+                            stateForRoute?.nextStop != null,
+                      );
 
                       final completedAndOngoingStops = stops
                           .asMap()
@@ -716,9 +1200,15 @@ class _RidesScreenState extends State<RidesScreen> {
                           .where((e) {
                             if (e.key == currentIdx) return false;
                             final s = e.value['status'];
-                            final isCompletedOrNoShow = s == 'Completed' || s == 'NoShow' || s == 'No Show' || s == 'No-Show';
-                            final isOngoingButNotCurrent = logType == 'IN' && s == 'Ongoing';
-                            return isCompletedOrNoShow || isOngoingButNotCurrent;
+                            final isCompletedOrNoShow =
+                                s == 'Completed' ||
+                                s == 'NoShow' ||
+                                s == 'No Show' ||
+                                s == 'No-Show';
+                            final isOngoingButNotCurrent =
+                                logType == 'IN' && s == 'Ongoing';
+                            return isCompletedOrNoShow ||
+                                isOngoingButNotCurrent;
                           })
                           .toList();
 
@@ -728,29 +1218,48 @@ class _RidesScreenState extends State<RidesScreen> {
                           if (currentIdx >= 0) ...[
                             _buildSectionHeader(
                               'CURRENT STOP',
-                              subtitle: '${stops[currentIdx]['employee_name'] ?? ''} • Stop ${currentIdx + 1} of ${stops.length}',
-                              rightAction: _buildViewMapButton(stops[currentIdx]),
+                              subtitle:
+                                  '${stops[currentIdx]['employee_name'] ?? ''} • Stop ${currentIdx + 1} of ${stops.length}',
+                              rightAction: _buildViewMapButton(
+                                stops[currentIdx],
+                              ),
                             ),
                             const SizedBox(height: 10),
-                            _buildCurrentStopCard(stops[currentIdx], route, provider, currentIdx),
+                            _buildCurrentStopCard(
+                              stops[currentIdx],
+                              route,
+                              provider,
+                              currentIdx,
+                            ),
                             const SizedBox(height: 18),
                           ],
-                          if (upcomingStops.isNotEmpty) ...[
+                          if (upcomingIndices.isNotEmpty) ...[
                             _buildSectionHeader(
-                              'Upcoming Stops (${upcomingStops.length})',
+                              'Upcoming Stops (${upcomingIndices.length})',
                               rightAction: _buildSortChip(),
                             ),
                             const SizedBox(height: 10),
-                            ...upcomingStops.asMap().entries.map((e) {
-                              final globalIdx = e.value.key;
-                              final stop = e.value.value;
-                              return _buildUpcomingStopTile(stop, route, provider, globalIdx + 1);
+                            ...upcomingIndices.asMap().entries.map((e) {
+                              final stopIndex = e.value;
+                              final stop = stops[stopIndex];
+                              return _buildUpcomingStopTile(
+                                stop,
+                                route,
+                                provider,
+                                stopIndex + 1,
+                              );
                             }),
                           ],
                           if (completedAndOngoingStops.isNotEmpty) ...[
                             const SizedBox(height: 10),
                             ...completedAndOngoingStops.map((e) {
-                              return _buildTimelineStopItem(e.value, route, provider, e.key, e.key == stops.length - 1);
+                              return _buildTimelineStopItem(
+                                e.value,
+                                route,
+                                provider,
+                                e.key,
+                                e.key == stops.length - 1,
+                              );
                             }),
                           ],
                         ],
@@ -761,10 +1270,18 @@ class _RidesScreenState extends State<RidesScreen> {
               )
             else
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 28,
+                  horizontal: 16,
+                ),
                 child: Center(
-                  child: Text('No stops assigned for this route.',
-                      style: GoogleFonts.poppins(color: _C.textSecondary, fontSize: 13)),
+                  child: Text(
+                    'No stops assigned for this route.',
+                    style: GoogleFonts.poppins(
+                      color: _C.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
               ),
 
@@ -780,9 +1297,18 @@ class _RidesScreenState extends State<RidesScreen> {
                       icon: Icons.rocket_launch_rounded,
                       color: _C.blue,
                       onPressed: () {
-                        final vehicleIdRaw = route['vehicle_id'] ?? route['vehicle']?['id'] ?? route['vehicle']?['vehicle_id'];
-                        final vehicleId = vehicleIdRaw != null ? int.tryParse(vehicleIdRaw.toString()) : null;
-                        _handleStartDuty(routeId.toString(), provider, vehicleId: vehicleId);
+                        final vehicleIdRaw =
+                            route['vehicle_id'] ??
+                            route['vehicle']?['id'] ??
+                            route['vehicle']?['vehicle_id'];
+                        final vehicleId = vehicleIdRaw != null
+                            ? int.tryParse(vehicleIdRaw.toString())
+                            : null;
+                        _handleStartDuty(
+                          routeId.toString(),
+                          provider,
+                          vehicleId: vehicleId,
+                        );
                       },
                     ),
                   if (showEscortBoard)
@@ -790,11 +1316,14 @@ class _RidesScreenState extends State<RidesScreen> {
                       label: 'BOARD ESCORT',
                       icon: Icons.security_rounded,
                       color: _C.teal,
-                      onPressed: () => _handleEscortBoard(routeId.toString(), provider),
+                      onPressed: () =>
+                          _handleEscortBoard(routeId.toString(), provider),
                     ),
                   if (isOngoing) ...[
                     const SizedBox(height: 8),
-                    _buildEndDutyButton(() => _handleEndDuty(routeId.toString(), provider)),
+                    _buildEndDutyButton(
+                      () => _handleEndDuty(routeId.toString(), provider),
+                    ),
                   ],
                 ],
               ),
@@ -809,27 +1338,35 @@ class _RidesScreenState extends State<RidesScreen> {
   // Shown instead of all passenger stops when escort hasn't been boarded yet.
 
   Widget _buildEscortGate(dynamic route, BookingProvider provider) {
-    final escortName  = route['escort_name']?.toString()
-        ?? route['assigned_escort']?['name']?.toString()
-        ?? route['assigned_escort']?['employee_name']?.toString()
-        ?? 'Security Escort';
-    final escortPhone = route['escort_phone']?.toString()
-        ?? route['assigned_escort']?['phone']?.toString()
-        ?? route['assigned_escort']?['phone_number']?.toString();
-    final stopCount   = (route['stops'] as List? ?? []).length;
-    final routeId     = route['route_id']?.toString() ?? '';
+    final escortName =
+        route['escort_name']?.toString() ??
+        route['assigned_escort']?['name']?.toString() ??
+        route['assigned_escort']?['employee_name']?.toString() ??
+        'Security Escort';
+    final escortPhone =
+        route['escort_phone']?.toString() ??
+        route['assigned_escort']?['phone']?.toString() ??
+        route['assigned_escort']?['phone_number']?.toString();
+    final stopCount = (route['stops'] as List? ?? []).length;
+    final routeId = route['route_id']?.toString() ?? '';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [_C.teal.withValues(alpha: 0.08), _C.tealBg.withValues(alpha: 0.5)],
+            colors: [
+              _C.teal.withValues(alpha: 0.08),
+              _C.tealBg.withValues(alpha: 0.5),
+            ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _C.teal.withValues(alpha: 0.35), width: 1.5),
+          border: Border.all(
+            color: _C.teal.withValues(alpha: 0.35),
+            width: 1.5,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -841,8 +1378,15 @@ class _RidesScreenState extends State<RidesScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(10),
-                    decoration: const BoxDecoration(color: _C.tealBg, shape: BoxShape.circle),
-                    child: const Icon(Icons.security_rounded, color: _C.teal, size: 26),
+                    decoration: const BoxDecoration(
+                      color: _C.tealBg,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.security_rounded,
+                      color: _C.teal,
+                      size: 26,
+                    ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -852,12 +1396,18 @@ class _RidesScreenState extends State<RidesScreen> {
                         Text(
                           escortName,
                           style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.bold, fontSize: 15, color: _C.textPrimary),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: _C.textPrimary,
+                          ),
                         ),
                         Text(
                           'Escort must board before any passenger stop',
                           style: GoogleFonts.poppins(
-                              fontSize: 11.5, color: _C.teal, fontWeight: FontWeight.w600),
+                            fontSize: 11.5,
+                            color: _C.teal,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
@@ -887,13 +1437,20 @@ class _RidesScreenState extends State<RidesScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.lock_rounded, size: 16, color: _C.teal.withValues(alpha: 0.7)),
+                  Icon(
+                    Icons.lock_rounded,
+                    size: 16,
+                    color: _C.teal.withValues(alpha: 0.7),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       '$stopCount passenger stop${stopCount == 1 ? '' : 's'} will unlock after escort boards',
                       style: GoogleFonts.poppins(
-                          fontSize: 12, color: _C.textSecondary, fontWeight: FontWeight.w500),
+                        fontSize: 12,
+                        color: _C.textSecondary,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ],
@@ -905,16 +1462,26 @@ class _RidesScreenState extends State<RidesScreen> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               child: ElevatedButton.icon(
                 onPressed: () => _handleEscortBoard(routeId, provider),
-                icon: const Icon(Icons.security_rounded, size: 18, color: Colors.white),
+                icon: const Icon(
+                  Icons.security_rounded,
+                  size: 18,
+                  color: Colors.white,
+                ),
                 label: Text(
                   'BOARD ESCORT NOW',
                   style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white, letterSpacing: 0.4),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Colors.white,
+                    letterSpacing: 0.4,
+                  ),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _C.teal,
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   elevation: 0,
                 ),
@@ -928,7 +1495,11 @@ class _RidesScreenState extends State<RidesScreen> {
 
   // ─── Section Headers ────────────────────────────────────────────────────────
 
-  Widget _buildSectionHeader(String title, {String? subtitle, Widget? rightAction}) {
+  Widget _buildSectionHeader(
+    String title, {
+    String? subtitle,
+    Widget? rightAction,
+  }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -946,16 +1517,24 @@ class _RidesScreenState extends State<RidesScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(title,
-                  style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 11,
-                      color: _C.textSecondary,
-                      letterSpacing: 0.8)),
+              Text(
+                title,
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                  color: _C.textSecondary,
+                  letterSpacing: 0.8,
+                ),
+              ),
               if (subtitle != null)
-                Text(subtitle,
-                    style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.bold, fontSize: 13.5, color: _C.textPrimary)),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13.5,
+                    color: _C.textPrimary,
+                  ),
+                ),
             ],
           ),
         ),
@@ -964,28 +1543,35 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-
-
   Widget _buildEndDutyButton(VoidCallback onPressed) {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-              color: _C.red.withValues(alpha: 0.22),
-              blurRadius: 14,
-              offset: const Offset(0, 5)),
+            color: _C.red.withValues(alpha: 0.22),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
         ],
       ),
       child: ElevatedButton.icon(
         onPressed: onPressed,
         icon: const Icon(Icons.flag_rounded, size: 17, color: Colors.white),
-        label: Text('END DUTY',
-            style: GoogleFonts.poppins(
-                fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white, letterSpacing: 0.5)),
+        label: Text(
+          'END DUTY',
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            color: Colors.white,
+            letterSpacing: 0.5,
+          ),
+        ),
         style: ElevatedButton.styleFrom(
           backgroundColor: _C.red,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           padding: const EdgeInsets.symmetric(vertical: 14),
           elevation: 0,
         ),
@@ -1002,7 +1588,14 @@ class _RidesScreenState extends State<RidesScreen> {
         if (lat != null && lng != null) _openExternalMap(lat, lng, address);
       },
       icon: const Icon(Icons.map_outlined, size: 14, color: _C.blue),
-      label: Text('View Map', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: _C.blue)),
+      label: Text(
+        'View Map',
+        style: GoogleFonts.poppins(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: _C.blue,
+        ),
+      ),
       style: TextButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -1021,9 +1614,20 @@ class _RidesScreenState extends State<RidesScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('Stop Order', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: _C.textSecondary)),
+          Text(
+            'Stop Order',
+            style: GoogleFonts.poppins(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: _C.textSecondary,
+            ),
+          ),
           const SizedBox(width: 4),
-          const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _C.textSecondary),
+          const Icon(
+            Icons.keyboard_arrow_down_rounded,
+            size: 16,
+            color: _C.textSecondary,
+          ),
         ],
       ),
     );
@@ -1031,26 +1635,60 @@ class _RidesScreenState extends State<RidesScreen> {
 
   // ─── Current Stop Card ───────────────────────────────────────────────────────
 
-  Widget _buildCurrentStopCard(dynamic stop, dynamic route, BookingProvider provider, int index) {
+  Widget _buildCurrentStopCard(
+    dynamic stop,
+    dynamic route,
+    BookingProvider provider,
+    int index,
+  ) {
     final passengerName = stop['employee_name'] ?? 'Passenger';
-    final initial = passengerName.isNotEmpty ? passengerName[0].toUpperCase() : 'P';
-    final phone   = stop['employee_phone']?.toString() ?? '';
-    final status  = stop['status'] ?? 'Scheduled';
-    final eta     = stop['estimated_pick_up_time'] ?? '';
-    final isOnBoard  = status == 'Ongoing';
-    final address    = isOnBoard ? (stop['drop_location'] ?? '') : (stop['pickup_location'] ?? '');
-    final double? lat = isOnBoard ? stop['drop_latitude']  : stop['pickup_latitude'];
-    final double? lng = isOnBoard ? stop['drop_longitude'] : stop['pickup_longitude'];
+    final initial = passengerName.isNotEmpty
+        ? passengerName[0].toUpperCase()
+        : 'P';
+    final phone = stop['employee_phone']?.toString() ?? '';
+    final status = stop['status'] ?? 'Scheduled';
+    final eta = _stopEta(stop, route);
+    final isOnBoard = status == 'Ongoing';
+    final address = isOnBoard
+        ? (stop['drop_location'] ?? '')
+        : (stop['pickup_location'] ?? '');
+    final double? lat = isOnBoard
+        ? stop['drop_latitude']
+        : stop['pickup_latitude'];
+    final double? lng = isOnBoard
+        ? stop['drop_longitude']
+        : stop['pickup_longitude'];
 
-    final bool showPickup = route['status'] == 'Ongoing' && status == 'Scheduled';
-    final bool showDrop   = route['status'] == 'Ongoing' && status == 'Ongoing';
+    final currentState = provider.currentState;
+    final stateRouteId = currentState?.route?.routeId?.toString();
+    final isBackendCurrentStop =
+        currentState == null ||
+        (stateRouteId == route['route_id']?.toString() &&
+            currentState.dutyStatus == 'ON_DUTY' &&
+            currentState.currentStop?.bookingId?.toString() ==
+                stop['booking_id']?.toString());
+    final backendPhase = currentState?.phase;
+    final bool showPickup =
+        route['status'] == 'Ongoing' &&
+        status == 'Scheduled' &&
+        isBackendCurrentStop &&
+        (currentState == null || backendPhase == 'GOING_TO_PICKUP');
+    final bool showDrop =
+        route['status'] == 'Ongoing' &&
+        status == 'Ongoing' &&
+        isBackendCurrentStop &&
+        (currentState == null || backendPhase == 'TRAVEL_TO_DROP');
     final logType = route['log_type'] ?? 'IN';
     final config = DriverConfigService().config;
     final bool isOtpRequired = isOnBoard
         ? (stop['is_deboarding_otp_required'] == true &&
-            (logType == 'IN' ? config.loginDeboardingOtp : config.logoutDeboardingOtp))
+              (logType == 'IN'
+                  ? config.loginDeboardingOtp
+                  : config.logoutDeboardingOtp))
         : (stop['is_boarding_otp_required'] == true &&
-            (logType == 'IN' ? config.loginBoardingOtp : config.logoutBoardingOtp));
+              (logType == 'IN'
+                  ? config.loginBoardingOtp
+                  : config.logoutBoardingOtp));
 
     final avatarColor = _avatarColor(initial);
 
@@ -1060,7 +1698,11 @@ class _RidesScreenState extends State<RidesScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _C.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 3)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
         ],
       ),
       child: Column(
@@ -1077,12 +1719,18 @@ class _RidesScreenState extends State<RidesScreen> {
                   child: Container(
                     width: 13,
                     height: 13,
-                    decoration: const BoxDecoration(color: _C.blue, shape: BoxShape.circle),
+                    decoration: const BoxDecoration(
+                      color: _C.blue,
+                      shape: BoxShape.circle,
+                    ),
                     child: Center(
                       child: Container(
                         width: 5,
                         height: 5,
-                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
                       ),
                     ),
                   ),
@@ -1094,12 +1742,19 @@ class _RidesScreenState extends State<RidesScreen> {
                   decoration: BoxDecoration(
                     color: avatarColor.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
-                    border: Border.all(color: avatarColor.withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: avatarColor.withValues(alpha: 0.3),
+                    ),
                   ),
                   alignment: Alignment.center,
-                  child: Text(initial,
-                      style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.bold, fontSize: 17, color: avatarColor)),
+                  child: Text(
+                    initial,
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
+                      color: avatarColor,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 10),
                 // Name + phone block
@@ -1107,51 +1762,97 @@ class _RidesScreenState extends State<RidesScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(passengerName,
-                          style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.bold, fontSize: 18, color: _C.textPrimary, height: 1.2)),
+                      Text(
+                        passengerName,
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: _C.textPrimary,
+                          height: 1.2,
+                        ),
+                      ),
                       if (eta.isNotEmpty || isOtpRequired) ...[
                         const SizedBox(height: 6),
                         Row(
                           children: [
                             if (eta.isNotEmpty)
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
                                 decoration: BoxDecoration(
-                                    color: _C.blueBg, borderRadius: BorderRadius.circular(6)),
+                                  color: _C.blueBg,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.access_time_rounded, size: 11, color: _C.blue),
+                                    const Icon(
+                                      Icons.access_time_rounded,
+                                      size: 11,
+                                      color: _C.blue,
+                                    ),
                                     const SizedBox(width: 4),
                                     Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Text('ETA',
-                                            style: GoogleFonts.poppins(
-                                                fontSize: 8, color: _C.blue, fontWeight: FontWeight.bold)),
-                                        Text(_formatTime(eta),
-                                            style: GoogleFonts.poppins(
-                                                fontSize: 10, color: _C.blue, fontWeight: FontWeight.bold)),
+                                        Text(
+                                          'ETA',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 8,
+                                            color: _C.blue,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        Text(
+                                          _formatTime(eta),
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 10,
+                                            color: _C.blue,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ],
                                 ),
                               ),
-                            if (isOtpRequired && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
+                            if (isOtpRequired &&
+                                ![
+                                  'NoShow',
+                                  'No Show',
+                                  'No-Show',
+                                ].contains(status)) ...[
                               const SizedBox(width: 8),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
                                 decoration: BoxDecoration(
-                                    color: _C.amberBg,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(color: _C.amber.withValues(alpha: 0.3))),
+                                  color: _C.amberBg,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: _C.amber.withValues(alpha: 0.3),
+                                  ),
+                                ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.lock_rounded, size: 10, color: _C.amber),
+                                    const Icon(
+                                      Icons.lock_rounded,
+                                      size: 10,
+                                      color: _C.amber,
+                                    ),
                                     const SizedBox(width: 4),
-                                    Text('OTP',
-                                        style: GoogleFonts.poppins(
-                                            fontSize: 9.5, color: _C.amber, fontWeight: FontWeight.bold)),
+                                    Text(
+                                      'OTP',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 9.5,
+                                        color: _C.amber,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -1193,21 +1894,31 @@ class _RidesScreenState extends State<RidesScreen> {
                     Text(
                       isOnBoard ? 'Drop Address' : 'Pickup Address',
                       style: GoogleFonts.poppins(
-                          fontSize: 9.5,
-                          color: _C.textSecondary,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.4),
+                        fontSize: 9.5,
+                        color: _C.textSecondary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Icon(Icons.location_on_rounded, size: 14, color: _C.blue),
+                        const Icon(
+                          Icons.location_on_rounded,
+                          size: 14,
+                          color: _C.blue,
+                        ),
                         const SizedBox(width: 5),
                         Expanded(
-                          child: Text(address,
-                              style: GoogleFonts.poppins(
-                                  fontSize: 12.5, color: _C.textPrimary, fontWeight: FontWeight.w500)),
+                          child: Text(
+                            address,
+                            style: GoogleFonts.poppins(
+                              fontSize: 12.5,
+                              color: _C.textPrimary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
                         ),
                         if (lat != null && lng != null) ...[
                           const SizedBox(width: 8),
@@ -1235,12 +1946,24 @@ class _RidesScreenState extends State<RidesScreen> {
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () => _handlePickup(stop, route, provider),
-                        icon: const Icon(Icons.check_circle_outline_rounded, size: 15, color: Colors.white),
-                        label: Text('Board',
-                            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
+                        icon: const Icon(
+                          Icons.check_circle_outline_rounded,
+                          size: 15,
+                          color: Colors.white,
+                        ),
+                        label: Text(
+                          'Board',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Colors.white,
+                          ),
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _C.green,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                           minimumSize: const Size(0, 48),
                           padding: const EdgeInsets.symmetric(vertical: 0),
                           elevation: 0,
@@ -1251,12 +1974,24 @@ class _RidesScreenState extends State<RidesScreen> {
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () => _handleDrop(stop, route, provider),
-                        icon: const Icon(Icons.logout_rounded, size: 15, color: Colors.white),
-                        label: Text('Drop',
-                            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
+                        icon: const Icon(
+                          Icons.logout_rounded,
+                          size: 15,
+                          color: Colors.white,
+                        ),
+                        label: Text(
+                          'Drop',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Colors.white,
+                          ),
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _C.purple,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                           minimumSize: const Size(0, 48),
                           padding: const EdgeInsets.symmetric(vertical: 0),
                           elevation: 0,
@@ -1268,13 +2003,27 @@ class _RidesScreenState extends State<RidesScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () => _handleNoShow(stop, route, provider),
-                        icon: Icon(Icons.cancel_outlined, size: 14, color: _C.red),
-                        label: Text('No Show',
-                            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: _C.red)),
+                        icon: Icon(
+                          Icons.cancel_outlined,
+                          size: 14,
+                          color: _C.red,
+                        ),
+                        label: Text(
+                          'No Show',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: _C.red,
+                          ),
+                        ),
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: _C.red.withValues(alpha: 0.4)),
+                          side: BorderSide(
+                            color: _C.red.withValues(alpha: 0.4),
+                          ),
                           backgroundColor: _C.redBg,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                           minimumSize: const Size(0, 48),
                           padding: const EdgeInsets.symmetric(vertical: 0),
                         ),
@@ -1291,13 +2040,22 @@ class _RidesScreenState extends State<RidesScreen> {
 
   // ─── Upcoming Stop Tile ──────────────────────────────────────────────────────
 
-  Widget _buildUpcomingStopTile(dynamic stop, dynamic route, BookingProvider provider, int displayIndex) {
+  Widget _buildUpcomingStopTile(
+    dynamic stop,
+    dynamic route,
+    BookingProvider provider,
+    int displayIndex,
+  ) {
     final passengerName = stop['employee_name'] ?? 'Passenger';
-    final initial = passengerName.isNotEmpty ? passengerName[0].toUpperCase() : 'P';
-    final status  = stop['status'] ?? 'Scheduled';
+    final initial = passengerName.isNotEmpty
+        ? passengerName[0].toUpperCase()
+        : 'P';
+    final status = stop['status'] ?? 'Scheduled';
     final bool isOnBoard = status == 'Ongoing';
-    final address = isOnBoard ? (stop['drop_location'] ?? '') : (stop['pickup_location'] ?? stop['drop_location'] ?? '');
-    final eta     = stop['estimated_pick_up_time'] ?? '';
+    final address = isOnBoard
+        ? (stop['drop_location'] ?? '')
+        : (stop['pickup_location'] ?? stop['drop_location'] ?? '');
+    final eta = _stopEta(stop, route);
     final avatarColor = _avatarColor(initial);
 
     return Container(
@@ -1314,9 +2072,14 @@ class _RidesScreenState extends State<RidesScreen> {
             width: 32,
             alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text('$displayIndex',
-                style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold, fontSize: 13, color: _C.textSecondary)),
+            child: Text(
+              '$displayIndex',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: _C.textSecondary,
+              ),
+            ),
           ),
           // Avatar
           Container(
@@ -1328,9 +2091,14 @@ class _RidesScreenState extends State<RidesScreen> {
               border: Border.all(color: avatarColor.withValues(alpha: 0.25)),
             ),
             alignment: Alignment.center,
-            child: Text(initial,
-                style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold, fontSize: 14, color: avatarColor)),
+            child: Text(
+              initial,
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+                color: avatarColor,
+              ),
+            ),
           ),
           const SizedBox(width: 10),
           // Name & address
@@ -1340,15 +2108,25 @@ class _RidesScreenState extends State<RidesScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(passengerName,
-                      style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.bold, fontSize: 13.5, color: _C.textPrimary)),
+                  Text(
+                    passengerName,
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13.5,
+                      color: _C.textPrimary,
+                    ),
+                  ),
                   if (address.isNotEmpty) ...[
                     const SizedBox(height: 2),
-                    Text(address,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(fontSize: 11, color: _C.textSecondary)),
+                    Text(
+                      address,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        color: _C.textSecondary,
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -1363,17 +2141,32 @@ class _RidesScreenState extends State<RidesScreen> {
               children: [
                 if (eta.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
-                        color: _C.blueBg, borderRadius: BorderRadius.circular(6)),
+                      color: _C.blueBg,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
                     child: Column(
                       children: [
-                        Text('ETA',
-                            style: GoogleFonts.poppins(
-                                fontSize: 8, color: _C.blue, fontWeight: FontWeight.bold)),
-                        Text(_formatTime(eta),
-                            style: GoogleFonts.poppins(
-                                fontSize: 10, color: _C.blue, fontWeight: FontWeight.bold)),
+                        Text(
+                          'ETA',
+                          style: GoogleFonts.poppins(
+                            fontSize: 8,
+                            color: _C.blue,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          _formatTime(eta),
+                          style: GoogleFonts.poppins(
+                            fontSize: 10,
+                            color: _C.blue,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -1382,15 +2175,23 @@ class _RidesScreenState extends State<RidesScreen> {
                 if (stop['estimated_distance'] != null) ...[
                   const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: _C.bg,
                       borderRadius: BorderRadius.circular(4),
                       border: Border.all(color: _C.border),
                     ),
-                    child: Text('${stop['estimated_distance']} km',
-                        style: GoogleFonts.poppins(
-                            fontSize: 8, color: _C.textSecondary, fontWeight: FontWeight.bold)),
+                    child: Text(
+                      '${stop['estimated_distance']} km',
+                      style: GoogleFonts.poppins(
+                        fontSize: 8,
+                        color: _C.textSecondary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ],
               ],
@@ -1405,7 +2206,11 @@ class _RidesScreenState extends State<RidesScreen> {
                 color: _C.bg,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.lock_rounded, color: _C.textSecondary, size: 16),
+              child: const Icon(
+                Icons.lock_rounded,
+                color: _C.textSecondary,
+                size: 16,
+              ),
             ),
           ),
           const SizedBox(width: 4),
@@ -1416,16 +2221,29 @@ class _RidesScreenState extends State<RidesScreen> {
 
   // ─── Completed / NoShow Timeline Item ───────────────────────────────────────
 
-  Widget _buildTimelineStopItem(dynamic stop, dynamic route, BookingProvider provider, int index, bool isLast) {
+  Widget _buildTimelineStopItem(
+    dynamic stop,
+    dynamic route,
+    BookingProvider provider,
+    int index,
+    bool isLast,
+  ) {
     final String status = stop['status'] ?? 'Scheduled';
     final bool isCompleted = status == 'Completed';
-    final bool isNoShow    = ['NoShow', 'No Show', 'No-Show'].contains(status);
+    final bool isNoShow = ['NoShow', 'No Show', 'No-Show'].contains(status);
 
     Color dotColor;
     IconData dotIcon;
-    if (isCompleted)       { dotColor = _C.green; dotIcon = Icons.check_circle_rounded; }
-    else if (isNoShow)     { dotColor = _C.red;   dotIcon = Icons.cancel_rounded;        }
-    else                   { dotColor = _C.amber;  dotIcon = Icons.radio_button_checked_rounded; }
+    if (isCompleted) {
+      dotColor = _C.green;
+      dotIcon = Icons.check_circle_rounded;
+    } else if (isNoShow) {
+      dotColor = _C.red;
+      dotIcon = Icons.cancel_rounded;
+    } else {
+      dotColor = _C.amber;
+      dotIcon = Icons.radio_button_checked_rounded;
+    }
 
     return IntrinsicHeight(
       child: Row(
@@ -1462,22 +2280,38 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  Widget _buildLogoutBoardCard(dynamic stop, dynamic route, BookingProvider provider, int index) {
-    final String status  = stop['status'] ?? 'Scheduled';
+  Widget _buildLogoutBoardCard(
+    dynamic stop,
+    dynamic route,
+    BookingProvider provider,
+    int index,
+  ) {
+    final String status = stop['status'] ?? 'Scheduled';
     final bool isBoarded = status == 'Ongoing';
-    final bool isCompleted = status == 'Completed' || ['NoShow', 'No Show', 'No-Show'].contains(status);
+    final bool isCompleted =
+        status == 'Completed' ||
+        ['NoShow', 'No Show', 'No-Show'].contains(status);
     final String passengerName = stop['employee_name'] ?? 'Passenger';
-    final String initial = passengerName.isNotEmpty ? passengerName[0].toUpperCase() : 'P';
+    final String initial = passengerName.isNotEmpty
+        ? passengerName[0].toUpperCase()
+        : 'P';
     final Color avatarColor = _avatarColor(initial);
     final String phone = stop['employee_phone']?.toString() ?? '';
-    final String address = isBoarded ? (stop['drop_location'] ?? '') : (stop['pickup_location'] ?? 'Office');
-    final String eta = stop['estimated_pick_up_time'] ?? '';
+    final String address = isBoarded
+        ? (stop['drop_location'] ?? '')
+        : (stop['pickup_location'] ?? 'Office');
+    final String eta = _stopEta(stop, route);
 
     final config = DriverConfigService().config;
-    final bool isOtpRequired = stop['is_boarding_otp_required'] == true && config.logoutBoardingOtp;
+    final bool isOtpRequired =
+        stop['is_boarding_otp_required'] == true && config.logoutBoardingOtp;
 
-    final double? lat = isBoarded ? stop['drop_latitude'] : stop['pickup_latitude'];
-    final double? lng = isBoarded ? stop['drop_longitude'] : stop['pickup_longitude'];
+    final double? lat = isBoarded
+        ? stop['drop_latitude']
+        : stop['pickup_latitude'];
+    final double? lng = isBoarded
+        ? stop['drop_longitude']
+        : stop['pickup_longitude'];
 
     return Container(
       decoration: BoxDecoration(
@@ -1497,13 +2331,16 @@ class _RidesScreenState extends State<RidesScreen> {
                 width: 28,
                 height: 28,
                 margin: const EdgeInsets.only(right: 8),
-                decoration: BoxDecoration(
-                  color: _C.bg,
-                  shape: BoxShape.circle,
-                ),
+                decoration: BoxDecoration(color: _C.bg, shape: BoxShape.circle),
                 alignment: Alignment.center,
-                child: Text('${index + 1}',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 11, color: _C.textSecondary)),
+                child: Text(
+                  '${index + 1}',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    color: _C.textSecondary,
+                  ),
+                ),
               ),
               // Avatar
               Container(
@@ -1514,26 +2351,42 @@ class _RidesScreenState extends State<RidesScreen> {
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
-                child: Text(initial,
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: avatarColor)),
+                child: Text(
+                  initial,
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: avatarColor,
+                  ),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(passengerName,
-                        style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.bold, fontSize: 13.5, color: _C.textPrimary)),
+                    Text(
+                      passengerName,
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13.5,
+                        color: _C.textPrimary,
+                      ),
+                    ),
                     if (address.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Row(
                         children: [
                           Expanded(
-                            child: Text(address,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(fontSize: 11, color: _C.textSecondary)),
+                            child: Text(
+                              address,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                color: _C.textSecondary,
+                              ),
+                            ),
                           ),
                           if (lat != null && lng != null) ...[
                             const SizedBox(width: 6),
@@ -1560,7 +2413,11 @@ class _RidesScreenState extends State<RidesScreen> {
               ),
             ],
           ),
-          if (!isCompleted && !isBoarded && (eta.isNotEmpty || isOtpRequired || stop['estimated_distance'] != null)) ...[
+          if (!isCompleted &&
+              !isBoarded &&
+              (eta.isNotEmpty ||
+                  isOtpRequired ||
+                  stop['estimated_distance'] != null)) ...[
             const SizedBox(height: 8),
             Wrap(
               spacing: 6,
@@ -1568,40 +2425,73 @@ class _RidesScreenState extends State<RidesScreen> {
               children: [
                 if (eta.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(color: _C.blueBg, borderRadius: BorderRadius.circular(6)),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _C.blueBg,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.access_time_rounded, size: 10, color: _C.blue),
+                        const Icon(
+                          Icons.access_time_rounded,
+                          size: 10,
+                          color: _C.blue,
+                        ),
                         const SizedBox(width: 4),
-                        Text('ETA: ${_formatTime(eta)}',
-                            style: GoogleFonts.poppins(
-                                fontSize: 10, color: _C.blue, fontWeight: FontWeight.bold)),
+                        Text(
+                          'ETA: ${_formatTime(eta)}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 10,
+                            color: _C.blue,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 if (isOtpRequired)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
-                        color: _C.amberBg,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: _C.amber.withValues(alpha: 0.3))),
+                      color: _C.amberBg,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: _C.amber.withValues(alpha: 0.3),
+                      ),
+                    ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.lock_rounded, size: 10, color: _C.amber),
+                        const Icon(
+                          Icons.lock_rounded,
+                          size: 10,
+                          color: _C.amber,
+                        ),
                         const SizedBox(width: 4),
-                        Text('OTP Required',
-                            style: GoogleFonts.poppins(
-                                fontSize: 9.5, color: _C.amber, fontWeight: FontWeight.bold)),
+                        Text(
+                          'OTP Required',
+                          style: GoogleFonts.poppins(
+                            fontSize: 9.5,
+                            color: _C.amber,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 if (stop['estimated_distance'] != null)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: _C.bg,
                       borderRadius: BorderRadius.circular(6),
@@ -1610,11 +2500,20 @@ class _RidesScreenState extends State<RidesScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.map_rounded, size: 10, color: _C.textSecondary),
+                        const Icon(
+                          Icons.map_rounded,
+                          size: 10,
+                          color: _C.textSecondary,
+                        ),
                         const SizedBox(width: 4),
-                        Text('${stop['estimated_distance']} km',
-                            style: GoogleFonts.poppins(
-                                fontSize: 9.5, color: _C.textSecondary, fontWeight: FontWeight.bold)),
+                        Text(
+                          '${stop['estimated_distance']} km',
+                          style: GoogleFonts.poppins(
+                            fontSize: 9.5,
+                            color: _C.textSecondary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -1628,14 +2527,24 @@ class _RidesScreenState extends State<RidesScreen> {
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: () => _handlePickup(stop, route, provider),
-                    icon: const Icon(Icons.check_circle_outline_rounded, size: 15, color: Colors.white),
+                    icon: const Icon(
+                      Icons.check_circle_outline_rounded,
+                      size: 15,
+                      color: Colors.white,
+                    ),
                     label: Text(
                       isOtpRequired ? 'Board (OTP)' : 'Board',
-                      style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: isOtpRequired ? _C.purple : _C.green,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       minimumSize: const Size(0, 48),
                       padding: const EdgeInsets.symmetric(vertical: 0),
                       elevation: 0,
@@ -1646,13 +2555,25 @@ class _RidesScreenState extends State<RidesScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () => _handleNoShow(stop, route, provider),
-                    icon: const Icon(Icons.cancel_outlined, size: 14, color: _C.red),
-                    label: Text('No Show',
-                        style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: _C.red)),
+                    icon: const Icon(
+                      Icons.cancel_outlined,
+                      size: 14,
+                      color: _C.red,
+                    ),
+                    label: Text(
+                      'No Show',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: _C.red,
+                      ),
+                    ),
                     style: OutlinedButton.styleFrom(
                       side: BorderSide(color: _C.red.withValues(alpha: 0.4)),
                       backgroundColor: _C.redBg,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       minimumSize: const Size(0, 48),
                       padding: const EdgeInsets.symmetric(vertical: 0),
                     ),
@@ -1666,32 +2587,56 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  Widget _buildPassengerCard(dynamic stop, dynamic route, BookingProvider provider, Color statusColor) {
-    final String status  = stop['status'] ?? 'Scheduled';
+  Widget _buildPassengerCard(
+    dynamic stop,
+    dynamic route,
+    BookingProvider provider,
+    Color statusColor,
+  ) {
+    final String status = stop['status'] ?? 'Scheduled';
     final String cleanStatus = status.trim().toLowerCase();
-    final bool isPastStop = cleanStatus == 'completed' || cleanStatus == 'dropped' || cleanStatus.contains('show');
+    final bool isPastStop =
+        cleanStatus == 'completed' ||
+        cleanStatus == 'dropped' ||
+        cleanStatus.contains('show');
     final bool isOnBoard = status == 'Ongoing';
-    final String address = isOnBoard ? (stop['drop_location'] ?? '') : (stop['pickup_location'] ?? '');
-    final double? lat    = isOnBoard ? stop['drop_latitude']  : stop['pickup_latitude'];
-    final double? lng    = isOnBoard ? stop['drop_longitude'] : stop['pickup_longitude'];
-    final String eta     = stop['estimated_pick_up_time'] ?? '';
-    
-    final bool hasEscort     = route['assigned_escort_id'] != null || route['has_escort'] == true || route['escort_required'] == true;
-    final bool escortBoarded = route['escort_boarded'] == true || route['escort_status'] == 'Boarded';
+    final String address = isOnBoard
+        ? (stop['drop_location'] ?? '')
+        : (stop['pickup_location'] ?? '');
+    final double? lat = isOnBoard
+        ? stop['drop_latitude']
+        : stop['pickup_latitude'];
+    final double? lng = isOnBoard
+        ? stop['drop_longitude']
+        : stop['pickup_longitude'];
+    final String eta = _stopEta(stop, route);
+
+    final bool hasEscort =
+        route['assigned_escort_id'] != null ||
+        route['has_escort'] == true ||
+        route['escort_required'] == true;
+    final bool escortBoarded =
+        route['escort_boarded'] == true || route['escort_status'] == 'Boarded';
     final bool isEscortPending = hasEscort && !escortBoarded;
 
     final bool showPickup = false;
-    final bool showDrop   = false;
+    final bool showDrop = false;
     final logType = route['log_type'] ?? 'IN';
     final config = DriverConfigService().config;
     final bool isOtpRequired = isOnBoard
         ? (stop['is_deboarding_otp_required'] == true &&
-            (logType == 'IN' ? config.loginDeboardingOtp : config.logoutDeboardingOtp))
+              (logType == 'IN'
+                  ? config.loginDeboardingOtp
+                  : config.logoutDeboardingOtp))
         : (stop['is_boarding_otp_required'] == true &&
-            (logType == 'IN' ? config.loginBoardingOtp : config.logoutBoardingOtp));
+              (logType == 'IN'
+                  ? config.loginBoardingOtp
+                  : config.logoutBoardingOtp));
 
     final passengerName = stop['employee_name'] ?? 'Passenger';
-    final initial = passengerName.isNotEmpty ? passengerName[0].toUpperCase() : 'P';
+    final initial = passengerName.isNotEmpty
+        ? passengerName[0].toUpperCase()
+        : 'P';
     final avatarColor = _avatarColor(initial);
 
     return Container(
@@ -1715,17 +2660,28 @@ class _RidesScreenState extends State<RidesScreen> {
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
-                child: Text(initial,
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13, color: avatarColor)),
+                child: Text(
+                  initial,
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: avatarColor,
+                  ),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(passengerName,
-                        style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.bold, fontSize: 13.5, color: _C.textPrimary)),
+                    Text(
+                      passengerName,
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13.5,
+                        color: _C.textPrimary,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1734,45 +2690,81 @@ class _RidesScreenState extends State<RidesScreen> {
                 children: [
                   _buildStatusBadge(status),
                   const SizedBox(height: 6),
-                  _buildCallChatRow(stop, stop['employee_phone']?.toString() ?? ''),
+                  _buildCallChatRow(
+                    stop,
+                    stop['employee_phone']?.toString() ?? '',
+                  ),
                 ],
               ),
             ],
           ),
           if (!isPastStop) ...[
-            if (eta.isNotEmpty || isOtpRequired || stop['estimated_distance'] != null) ...[
+            if (eta.isNotEmpty ||
+                isOtpRequired ||
+                stop['estimated_distance'] != null) ...[
               const SizedBox(height: 8),
               Row(
                 children: [
                   if (eta.isNotEmpty)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(color: _C.blueBg, borderRadius: BorderRadius.circular(6)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _C.blueBg,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
                       child: Row(
                         children: [
-                          const Icon(Icons.access_time_rounded, size: 10, color: _C.blue),
+                          const Icon(
+                            Icons.access_time_rounded,
+                            size: 10,
+                            color: _C.blue,
+                          ),
                           const SizedBox(width: 4),
-                          Text('ETA: ${_formatTime(eta)}',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 10, color: _C.blue, fontWeight: FontWeight.bold)),
+                          Text(
+                            'ETA: ${_formatTime(eta)}',
+                            style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              color: _C.blue,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                  if (isOtpRequired && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
+                  if (isOtpRequired &&
+                      !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
-                          color: _C.amberBg,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: _C.amber.withValues(alpha: 0.3))),
+                        color: _C.amberBg,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: _C.amber.withValues(alpha: 0.3),
+                        ),
+                      ),
                       child: Row(
                         children: [
-                          const Icon(Icons.lock_rounded, size: 10, color: _C.amber),
+                          const Icon(
+                            Icons.lock_rounded,
+                            size: 10,
+                            color: _C.amber,
+                          ),
                           const SizedBox(width: 4),
-                          Text('OTP Required',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 9.5, color: _C.amber, fontWeight: FontWeight.bold)),
+                          Text(
+                            'OTP Required',
+                            style: GoogleFonts.poppins(
+                              fontSize: 9.5,
+                              color: _C.amber,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1780,7 +2772,10 @@ class _RidesScreenState extends State<RidesScreen> {
                   if (stop['estimated_distance'] != null) ...[
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: _C.bg,
                         borderRadius: BorderRadius.circular(6),
@@ -1788,11 +2783,20 @@ class _RidesScreenState extends State<RidesScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.map_rounded, size: 10, color: _C.textSecondary),
+                          const Icon(
+                            Icons.map_rounded,
+                            size: 10,
+                            color: _C.textSecondary,
+                          ),
                           const SizedBox(width: 4),
-                          Text('${stop['estimated_distance']} km',
-                              style: GoogleFonts.poppins(
-                                  fontSize: 9.5, color: _C.textSecondary, fontWeight: FontWeight.bold)),
+                          Text(
+                            '${stop['estimated_distance']} km',
+                            style: GoogleFonts.poppins(
+                              fontSize: 9.5,
+                              color: _C.textSecondary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1800,19 +2804,36 @@ class _RidesScreenState extends State<RidesScreen> {
                 ],
               ),
             ],
-            if (address.isNotEmpty && !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
+            if (address.isNotEmpty &&
+                !['NoShow', 'No Show', 'No-Show'].contains(status)) ...[
               const SizedBox(height: 10),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
-                    color: _C.bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _C.border)),
+                  color: _C.bg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _C.border),
+                ),
                 child: Row(
                   children: [
-                    const Icon(Icons.place_rounded, size: 13, color: _C.textSecondary),
+                    const Icon(
+                      Icons.place_rounded,
+                      size: 13,
+                      color: _C.textSecondary,
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: Text(address,
-                          style: GoogleFonts.poppins(fontSize: 11.5, color: _C.textPrimary, fontWeight: FontWeight.w500)),
+                      child: Text(
+                        address,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11.5,
+                          color: _C.textPrimary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
                     if (lat != null && lng != null) ...[
                       const SizedBox(width: 8),
@@ -1832,32 +2853,68 @@ class _RidesScreenState extends State<RidesScreen> {
                   children: [
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: isEscortPending ? () {
-                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please board the escort first!')));
-                        } : () => _handlePickup(stop, route, provider),
+                        onPressed: isEscortPending
+                            ? () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Please board the escort first!',
+                                    ),
+                                  ),
+                                );
+                              }
+                            : () => _handlePickup(stop, route, provider),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isEscortPending ? _C.border : _C.green,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                          backgroundColor: isEscortPending
+                              ? _C.border
+                              : _C.green,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9),
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 9),
                           elevation: 0,
                         ),
-                        child: Text(isEscortPending ? 'BOARD ESCORT FIRST' : 'BOARD PASSENGER',
-                            style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: isEscortPending ? _C.textSecondary : Colors.white)),
+                        child: Text(
+                          isEscortPending
+                              ? 'BOARD ESCORT FIRST'
+                              : 'BOARD PASSENGER',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isEscortPending
+                                ? _C.textSecondary
+                                : Colors.white,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: isEscortPending ? null : () => _handleNoShow(stop, route, provider),
+                        onPressed: isEscortPending
+                            ? null
+                            : () => _handleNoShow(stop, route, provider),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: _C.red,
-                          side: BorderSide(color: isEscortPending ? _C.border : _C.red.withValues(alpha: 0.4)),
+                          side: BorderSide(
+                            color: isEscortPending
+                                ? _C.border
+                                : _C.red.withValues(alpha: 0.4),
+                          ),
                           backgroundColor: isEscortPending ? _C.bg : _C.redBg,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9),
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 9),
                         ),
-                        child: Text('NO SHOW',
-                            style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: isEscortPending ? _C.border : _C.red)),
+                        child: Text(
+                          'NO SHOW',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isEscortPending ? _C.border : _C.red,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -1871,12 +2928,20 @@ class _RidesScreenState extends State<RidesScreen> {
                     onPressed: () => _handleDrop(stop, route, provider),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _C.purple,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(9),
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 9),
                       elevation: 0,
                     ),
-                    child: Text('DROP PASSENGER',
-                        style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+                    child: Text(
+                      'DROP PASSENGER',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -1890,15 +2955,31 @@ class _RidesScreenState extends State<RidesScreen> {
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
   Color _avatarColor(String initial) {
-    final colors = [_C.blue, _C.green, _C.amber, _C.purple, _C.teal, _C.red, const Color(0xFFDB2777)];
+    final colors = [
+      _C.blue,
+      _C.green,
+      _C.amber,
+      _C.purple,
+      _C.teal,
+      _C.red,
+      const Color(0xFFDB2777),
+    ];
     return colors[initial.codeUnitAt(0) % colors.length];
   }
 
-  Widget _buildChip(String label, Color bg, Color fg,
-      {IconData? icon, bool dot = false}) {
+  Widget _buildChip(
+    String label,
+    Color bg,
+    Color fg, {
+    IconData? icon,
+    bool dot = false,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1913,9 +2994,15 @@ class _RidesScreenState extends State<RidesScreen> {
             Icon(icon, size: 10, color: fg),
             const SizedBox(width: 3),
           ],
-          Text(label,
-              style: GoogleFonts.poppins(
-                  color: fg, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.2)),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              color: fg,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.2,
+            ),
+          ),
         ],
       ),
     );
@@ -1924,12 +3011,24 @@ class _RidesScreenState extends State<RidesScreen> {
   Widget _buildStatusBadge(String status) {
     Color bg, fg;
     switch (status) {
-      case 'Completed': bg = _C.greenBg;  fg = _C.green;  break;
-      case 'Ongoing':   bg = _C.blueBg;   fg = _C.blue;   break;
+      case 'Completed':
+        bg = _C.greenBg;
+        fg = _C.green;
+        break;
+      case 'Ongoing':
+        bg = _C.blueBg;
+        fg = _C.blue;
+        break;
       case 'NoShow':
       case 'No Show':
-      case 'No-Show':   bg = _C.redBg;    fg = _C.red;    break;
-      default:          bg = _C.amberBg;  fg = _C.amber;  break;
+      case 'No-Show':
+        bg = _C.redBg;
+        fg = _C.red;
+        break;
+      default:
+        bg = _C.amberBg;
+        fg = _C.amber;
+        break;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -1940,13 +3039,23 @@ class _RidesScreenState extends State<RidesScreen> {
       ),
       child: Text(
         status.toUpperCase(),
-        style: GoogleFonts.poppins(color: fg, fontSize: 8.5, fontWeight: FontWeight.w800, letterSpacing: 0.4),
+        style: GoogleFonts.poppins(
+          color: fg,
+          fontSize: 8.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.4,
+        ),
       ),
     );
   }
 
   /// Pill-style stat (no dividers) for the summary row
-  Widget _buildSummaryStatPill(IconData icon, String value, String label, Color color) {
+  Widget _buildSummaryStatPill(
+    IconData icon,
+    String value,
+    String label,
+    Color color,
+  ) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
@@ -1963,12 +3072,23 @@ class _RidesScreenState extends State<RidesScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(value,
-                    style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.bold, fontSize: 13, color: _C.textPrimary, height: 1.2)),
-                Text(label,
-                    style: GoogleFonts.poppins(
-                        fontSize: 9.5, color: _C.textSecondary, fontWeight: FontWeight.w500)),
+                Text(
+                  value,
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: _C.textPrimary,
+                    height: 1.2,
+                  ),
+                ),
+                Text(
+                  label,
+                  style: GoogleFonts.poppins(
+                    fontSize: 9.5,
+                    color: _C.textSecondary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ],
             ),
           ],
@@ -1977,14 +3097,23 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-
-
-  Widget _buildPrimaryButton({required String label, required IconData icon, required Color color, required VoidCallback onPressed}) {
+  Widget _buildPrimaryButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onPressed,
+  }) {
     return ElevatedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 16, color: Colors.white),
-      label: Text(label,
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13.5, color: Colors.white)),
+      label: Text(
+        label,
+        style: GoogleFonts.poppins(
+          fontWeight: FontWeight.bold,
+          fontSize: 13.5,
+          color: Colors.white,
+        ),
+      ),
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -2019,7 +3148,9 @@ class _RidesScreenState extends State<RidesScreen> {
             bg: _C.blueBg,
             onTap: () {
               final bookingId = stop['booking_id'];
-              final int? id = bookingId is int ? bookingId : int.tryParse(bookingId.toString());
+              final int? id = bookingId is int
+                  ? bookingId
+                  : int.tryParse(bookingId.toString());
               if (id == null) return;
               Navigator.push(
                 context,
@@ -2039,7 +3170,12 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  Widget _iconAction({required IconData icon, required Color color, required Color bg, required VoidCallback onTap}) {
+  Widget _iconAction({
+    required IconData icon,
+    required Color color,
+    required Color bg,
+    required VoidCallback onTap,
+  }) {
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: onTap,
@@ -2056,13 +3192,11 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-
-
   // ─── Speed HUD (overlaps footer, Google Maps style) ─────────────────────────
 
   Widget _buildSpeedHud(LocationProvider locationProvider) {
-    final speed    = locationProvider.currentSpeedKmh;
-    final limit    = locationProvider.speedLimitKmh;
+    final speed = locationProvider.currentSpeedKmh;
+    final limit = locationProvider.speedLimitKmh;
     final exceeded = locationProvider.isSpeedLimitExceeded;
 
     Color hudColor;
@@ -2082,19 +3216,39 @@ class _RidesScreenState extends State<RidesScreen> {
         shape: BoxShape.circle,
         border: Border.all(color: hudColor, width: 3.5),
         boxShadow: [
-          BoxShadow(color: hudColor.withValues(alpha: 0.25), blurRadius: 18, spreadRadius: 2, offset: const Offset(0, -2)),
-          BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: hudColor.withValues(alpha: 0.25),
+            blurRadius: 18,
+            spreadRadius: 2,
+            offset: const Offset(0, -2),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.10),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(speed.toStringAsFixed(0),
-              style: GoogleFonts.poppins(
-                  color: hudColor, fontSize: 24, fontWeight: FontWeight.bold, height: 1.0)),
-          Text('km/h',
-              style: GoogleFonts.poppins(
-                  color: _C.textSecondary, fontSize: 9, fontWeight: FontWeight.bold)),
+          Text(
+            speed.toStringAsFixed(0),
+            style: GoogleFonts.poppins(
+              color: hudColor,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              height: 1.0,
+            ),
+          ),
+          Text(
+            'km/h',
+            style: GoogleFonts.poppins(
+              color: _C.textSecondary,
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
@@ -2104,16 +3258,31 @@ class _RidesScreenState extends State<RidesScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [Color(0xFFEF4444), Color(0xFFDC2626)]),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFEF4444), Color(0xFFDC2626)],
+        ),
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: _C.red.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 3))],
+        boxShadow: [
+          BoxShadow(
+            color: _C.red.withValues(alpha: 0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
-            child: const Icon(Icons.speed_rounded, color: Colors.white, size: 18),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.speed_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -2121,12 +3290,21 @@ class _RidesScreenState extends State<RidesScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Speed Limit Exceeded!',
-                    style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5)),
+                Text(
+                  'Speed Limit Exceeded!',
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12.5,
+                  ),
+                ),
                 Text(
                   '${locationProvider.currentSpeedKmh.toStringAsFixed(0)} km/h (Limit: ${locationProvider.speedLimitKmh.toStringAsFixed(0)} km/h)',
                   style: GoogleFonts.poppins(
-                      color: Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w500, fontSize: 11),
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontWeight: FontWeight.w500,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
@@ -2138,7 +3316,11 @@ class _RidesScreenState extends State<RidesScreen> {
 
   // ─── Action Handlers ─────────────────────────────────────────────────────────
 
-  Future<void> _handleStartDuty(String routeId, BookingProvider provider, {int? vehicleId}) async {
+  Future<void> _handleStartDuty(
+    String routeId,
+    BookingProvider provider, {
+    int? vehicleId,
+  }) async {
     final success = await provider.startDuty(routeId);
     if (success && mounted) {
       int? finalVehicleId = vehicleId;
@@ -2148,10 +3330,11 @@ class _RidesScreenState extends State<RidesScreen> {
           final userData = auth.currentUser;
           if (userData != null) {
             final driver = userData['driver'] ?? userData['user']?['driver'];
-            final vIdRaw = userData['vehicle_id'] ?? 
-                           userData['vehicle']?['id'] ?? 
-                           driver?['vehicle_id'] ?? 
-                           driver?['vehicle']?['id'];
+            final vIdRaw =
+                userData['vehicle_id'] ??
+                userData['vehicle']?['id'] ??
+                driver?['vehicle_id'] ??
+                driver?['vehicle']?['id'];
             if (vIdRaw != null) {
               finalVehicleId = int.tryParse(vIdRaw.toString());
             }
@@ -2160,20 +3343,30 @@ class _RidesScreenState extends State<RidesScreen> {
           debugPrint('Error resolving fallback vehicle ID: $e');
         }
       }
-      Provider.of<LocationProvider>(context, listen: false).setActiveRoute(routeId, vehicleId: finalVehicleId);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Duty Started!')));
+      Provider.of<LocationProvider>(
+        context,
+        listen: false,
+      ).setActiveRoute(routeId, vehicleId: finalVehicleId);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Duty Started!')));
     } else if (mounted) {
       _showErrorDialog(provider.error ?? 'Failed');
     }
   }
 
-  Future<void> _handleEscortBoard(String routeId, BookingProvider provider) async {
+  Future<void> _handleEscortBoard(
+    String routeId,
+    BookingProvider provider,
+  ) async {
     // Try without code first (handles `off` mode — board immediately).
     var result = await provider.escortBoard(routeId);
     if (!mounted) return;
 
     if (result['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Escort boarded successfully!')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Escort boarded successfully!')),
+      );
       return;
     }
 
@@ -2186,12 +3379,15 @@ class _RidesScreenState extends State<RidesScreen> {
     }
 
     if (result['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Escort boarded successfully!')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Escort boarded successfully!')),
+      );
       return;
     }
 
     final errorCode = result['errorCode'];
-    if (errorCode == 'INVALID_ESCORT_CODE' || errorCode == 'INVALID_ESCORT_OTP') {
+    if (errorCode == 'INVALID_ESCORT_CODE' ||
+        errorCode == 'INVALID_ESCORT_OTP') {
       _showInvalidCodeDialog();
     } else {
       _showErrorDialog(result['error'] ?? 'Failed to board escort');
@@ -2204,12 +3400,15 @@ class _RidesScreenState extends State<RidesScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => const Center(
-        child: CircularProgressIndicator(color: Color(0xFF3B82F6), strokeWidth: 2.5),
+        child: CircularProgressIndicator(
+          color: Color(0xFF3B82F6),
+          strokeWidth: 2.5,
+        ),
       ),
     );
 
     final result = await provider.endDuty(routeId, null, showLoading: false);
-    
+
     // Pop the loading dialog
     if (mounted) {
       Navigator.of(context, rootNavigator: true).pop();
@@ -2217,11 +3416,16 @@ class _RidesScreenState extends State<RidesScreen> {
 
     if (result['success'] == true) {
       if (mounted) {
-        Provider.of<LocationProvider>(context, listen: false).setActiveRoute(null);
+        Provider.of<LocationProvider>(
+          context,
+          listen: false,
+        ).setActiveRoute(null);
         if (result['summary'] != null) {
           _showTripSummaryDialog(result['summary']);
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Duty Ended!')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Duty Ended!')));
         }
       }
     } else if (mounted) {
@@ -2229,8 +3433,13 @@ class _RidesScreenState extends State<RidesScreen> {
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Text('Cannot End Duty', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Text(
+              'Cannot End Duty',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+            ),
             content: Text(
               'You have pending bookings. Please complete all pickups/drops or mark as no-show before ending duty.',
               style: GoogleFonts.poppins(fontSize: 13.5),
@@ -2238,8 +3447,14 @@ class _RidesScreenState extends State<RidesScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: Text('OK', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.blue)),
-              )
+                child: Text(
+                  'OK',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    color: _C.blue,
+                  ),
+                ),
+              ),
             ],
           ),
         );
@@ -2253,12 +3468,16 @@ class _RidesScreenState extends State<RidesScreen> {
     final routeCode = summary['route_code'] ?? '—';
     final boarded = summary['boarded_count'] ?? 0;
     final totalStops = summary['stops_count'] ?? 0;
-    
-    final double actualDist = (summary['actual_total_distance'] as num?)?.toDouble() ?? 0.0;
-    final double estDist = (summary['estimated_total_distance'] as num?)?.toDouble() ?? 0.0;
-    
-    final double actualTime = (summary['actual_total_time'] as num?)?.toDouble() ?? 0.0;
-    final double estTime = (summary['estimated_total_time'] as num?)?.toDouble() ?? 0.0;
+
+    final double actualDist =
+        (summary['actual_total_distance'] as num?)?.toDouble() ?? 0.0;
+    final double estDist =
+        (summary['estimated_total_distance'] as num?)?.toDouble() ?? 0.0;
+
+    final double actualTime =
+        (summary['actual_total_time'] as num?)?.toDouble() ?? 0.0;
+    final double estTime =
+        (summary['estimated_total_time'] as num?)?.toDouble() ?? 0.0;
 
     showDialog(
       context: context,
@@ -2290,7 +3509,7 @@ class _RidesScreenState extends State<RidesScreen> {
               ),
             ),
             const SizedBox(height: 20),
-            
+
             // Header Title
             Text(
               'Duty Completed Successfully!',
@@ -2312,7 +3531,7 @@ class _RidesScreenState extends State<RidesScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            
+
             // Summary Stats Grid
             Row(
               children: [
@@ -2354,7 +3573,7 @@ class _RidesScreenState extends State<RidesScreen> {
               ],
             ),
             const SizedBox(height: 24),
-            
+
             // Close Button
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx),
@@ -2362,7 +3581,9 @@ class _RidesScreenState extends State<RidesScreen> {
                 backgroundColor: const Color(0xFF1E6BFF),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 elevation: 0,
               ),
               child: Text(
@@ -2438,11 +3659,18 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  Future<void> _handlePickup(dynamic stop, dynamic route, BookingProvider provider) async {
+  Future<void> _handlePickup(
+    dynamic stop,
+    dynamic route,
+    BookingProvider provider,
+  ) async {
     final logType = route['log_type'] ?? 'IN';
     final config = DriverConfigService().config;
-    final bool adminOtpEnabled = logType == 'IN' ? config.loginBoardingOtp : config.logoutBoardingOtp;
-    final bool needsOtp = adminOtpEnabled && stop['is_boarding_otp_required'] == true;
+    final bool adminOtpEnabled = logType == 'IN'
+        ? config.loginBoardingOtp
+        : config.logoutBoardingOtp;
+    final bool needsOtp =
+        adminOtpEnabled && stop['is_boarding_otp_required'] == true;
 
     String? otp;
     if (needsOtp) {
@@ -2450,24 +3678,39 @@ class _RidesScreenState extends State<RidesScreen> {
       if (otp == null) return;
     }
     if (!mounted) return;
-    final locationProvider = Provider.of<LocationProvider>(context, listen: false);
+    final locationProvider = Provider.of<LocationProvider>(
+      context,
+      listen: false,
+    );
     final pos = await locationProvider.getCurrentLocation();
     if (pos == null) {
       if (mounted) _showErrorDialog('Location not valid');
       return;
     }
     final result = await provider.startTrip(
-        route['route_id'].toString(), stop['booking_id'].toString(), otp, pos.latitude, pos.longitude);
+      route['route_id'].toString(),
+      stop['booking_id'].toString(),
+      otp,
+      pos.latitude,
+      pos.longitude,
+    );
     if (result['success'] != true && mounted) {
       _handleStopEventError(result, provider);
     }
   }
 
-  Future<void> _handleDrop(dynamic stop, dynamic route, BookingProvider provider) async {
+  Future<void> _handleDrop(
+    dynamic stop,
+    dynamic route,
+    BookingProvider provider,
+  ) async {
     final logType = route['log_type'] ?? 'IN';
     final config = DriverConfigService().config;
-    final bool adminOtpEnabled = logType == 'IN' ? config.loginDeboardingOtp : config.logoutDeboardingOtp;
-    final bool needsOtp = adminOtpEnabled && stop['is_deboarding_otp_required'] == true;
+    final bool adminOtpEnabled = logType == 'IN'
+        ? config.loginDeboardingOtp
+        : config.logoutDeboardingOtp;
+    final bool needsOtp =
+        adminOtpEnabled && stop['is_deboarding_otp_required'] == true;
 
     String? otp;
     if (needsOtp) {
@@ -2475,14 +3718,22 @@ class _RidesScreenState extends State<RidesScreen> {
       if (otp == null) return;
     }
     if (!mounted) return;
-    final locationProvider = Provider.of<LocationProvider>(context, listen: false);
+    final locationProvider = Provider.of<LocationProvider>(
+      context,
+      listen: false,
+    );
     final pos = await locationProvider.getCurrentLocation();
     if (pos == null) {
       if (mounted) _showErrorDialog('Location not valid');
       return;
     }
     final result = await provider.dropTrip(
-        route['route_id'].toString(), stop['booking_id'].toString(), otp, pos.latitude, pos.longitude);
+      route['route_id'].toString(),
+      stop['booking_id'].toString(),
+      otp,
+      pos.latitude,
+      pos.longitude,
+    );
     if (result['success'] != true && mounted) {
       _handleStopEventError(result, provider);
     }
@@ -2491,8 +3742,13 @@ class _RidesScreenState extends State<RidesScreen> {
   /// Shared error handler for pickup and drop failures.
   /// Uses [errorCode] to decide the UX action; always displays the backend's
   /// own [message] string — nothing is hardcoded here.
-  void _handleStopEventError(Map<String, dynamic> result, BookingProvider provider) {
-    final String message  = result['error']?.toString() ?? 'Something went wrong. Please try again.';
+  void _handleStopEventError(
+    Map<String, dynamic> result,
+    BookingProvider provider,
+  ) {
+    final String message =
+        result['error']?.toString() ??
+        'Something went wrong. Please try again.';
     final String errorCode = result['errorCode']?.toString() ?? '';
 
     switch (errorCode) {
@@ -2502,12 +3758,18 @@ class _RidesScreenState extends State<RidesScreen> {
           SnackBar(
             content: Text(
               message,
-              style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
             ),
             backgroundColor: _C.amber,
             behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -2520,6 +3782,17 @@ class _RidesScreenState extends State<RidesScreen> {
         // Error dialog + silent background refresh.
         _showErrorDialog(message);
         provider.fetchTrips(status: 'ongoing', showLoading: false);
+        break;
+
+      case 'ROUTE_NOT_ONGOING':
+        // Stop the old route immediately; the ongoing refresh will install a
+        // replacement route if the driver has already been assigned one.
+        Provider.of<LocationProvider>(
+          context,
+          listen: false,
+        ).setActiveRoute(null);
+        provider.fetchTrips(status: 'ongoing', showLoading: false);
+        _showErrorDialog(message);
         break;
 
       case 'INVALID_BOARDING_OTP':
@@ -2538,8 +3811,14 @@ class _RidesScreenState extends State<RidesScreen> {
     }
   }
 
-  Future<void> _handleNoShow(dynamic stop, dynamic route, BookingProvider provider) async {
-    final TextEditingController reasonController = TextEditingController(text: 'Passenger did not arrive');
+  Future<void> _handleNoShow(
+    dynamic stop,
+    dynamic route,
+    BookingProvider provider,
+  ) async {
+    final TextEditingController reasonController = TextEditingController(
+      text: 'Passenger did not arrive',
+    );
     String selectedReason = 'Passenger did not arrive';
     final List<String> presetReasons = [
       'Passenger did not arrive',
@@ -2554,10 +3833,15 @@ class _RidesScreenState extends State<RidesScreen> {
       builder: (c) => StatefulBuilder(
         builder: (context, setState) {
           return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
             title: Text(
               'Mark No Show Reason',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
             ),
             content: SingleChildScrollView(
               child: Column(
@@ -2566,7 +3850,10 @@ class _RidesScreenState extends State<RidesScreen> {
                 children: [
                   Text(
                     'Select a reason for marking ${stop['employee_name'] ?? 'passenger'} as no-show:',
-                    style: GoogleFonts.poppins(fontSize: 12, color: _C.textSecondary),
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: _C.textSecondary,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   ...presetReasons.map((r) {
@@ -2584,18 +3871,27 @@ class _RidesScreenState extends State<RidesScreen> {
                       },
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 6),
-                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 8,
+                          horizontal: 10,
+                        ),
                         decoration: BoxDecoration(
-                          color: isSelected ? _C.red.withValues(alpha: 0.05) : Colors.transparent,
+                          color: isSelected
+                              ? _C.red.withValues(alpha: 0.05)
+                              : Colors.transparent,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: isSelected ? _C.red.withValues(alpha: 0.3) : _C.border,
+                            color: isSelected
+                                ? _C.red.withValues(alpha: 0.3)
+                                : _C.border,
                           ),
                         ),
                         child: Row(
                           children: [
                             Icon(
-                              isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                              isSelected
+                                  ? Icons.radio_button_checked_rounded
+                                  : Icons.radio_button_off_rounded,
                               color: isSelected ? _C.red : _C.textSecondary,
                               size: 16,
                             ),
@@ -2605,8 +3901,12 @@ class _RidesScreenState extends State<RidesScreen> {
                                 r,
                                 style: GoogleFonts.poppins(
                                   fontSize: 12,
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                  color: isSelected ? _C.textPrimary : _C.textSecondary,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.w500,
+                                  color: isSelected
+                                      ? _C.textPrimary
+                                      : _C.textSecondary,
                                 ),
                               ),
                             ),
@@ -2623,8 +3923,14 @@ class _RidesScreenState extends State<RidesScreen> {
                       maxLines: 2,
                       decoration: InputDecoration(
                         hintText: 'Enter custom reason...',
-                        hintStyle: GoogleFonts.poppins(fontSize: 12, color: _C.textSecondary),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        hintStyle: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: _C.textSecondary,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: const BorderSide(color: _C.border),
@@ -2644,7 +3950,11 @@ class _RidesScreenState extends State<RidesScreen> {
                 onPressed: () => Navigator.pop(c),
                 child: Text(
                   'Cancel',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.textSecondary, fontSize: 13),
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    color: _C.textSecondary,
+                    fontSize: 13,
+                  ),
                 ),
               ),
               ElevatedButton(
@@ -2658,13 +3968,22 @@ class _RidesScreenState extends State<RidesScreen> {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _C.red,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   elevation: 0,
                 ),
                 child: Text(
                   'Submit No Show',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ],
@@ -2687,12 +4006,27 @@ class _RidesScreenState extends State<RidesScreen> {
       context: context,
       builder: (c) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Invalid OTP', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.red)),
-        content: Text('The OTP you entered is incorrect. Please try again.', style: GoogleFonts.poppins(fontSize: 13.5)),
+        title: Text(
+          'Invalid OTP',
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.bold,
+            color: _C.red,
+          ),
+        ),
+        content: Text(
+          'The OTP you entered is incorrect. Please try again.',
+          style: GoogleFonts.poppins(fontSize: 13.5),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c),
-            child: Text('OK', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.blue)),
+            child: Text(
+              'OK',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.bold,
+                color: _C.blue,
+              ),
+            ),
           ),
         ],
       ),
@@ -2704,12 +4038,27 @@ class _RidesScreenState extends State<RidesScreen> {
       context: context,
       builder: (c) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Invalid Code', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.red)),
-        content: Text('The code you entered is incorrect. Please try again.', style: GoogleFonts.poppins(fontSize: 13.5)),
+        title: Text(
+          'Invalid Code',
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.bold,
+            color: _C.red,
+          ),
+        ),
+        content: Text(
+          'The code you entered is incorrect. Please try again.',
+          style: GoogleFonts.poppins(fontSize: 13.5),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c),
-            child: Text('OK', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: _C.blue)),
+            child: Text(
+              'OK',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.bold,
+                color: _C.blue,
+              ),
+            ),
           ),
         ],
       ),
@@ -2746,7 +4095,9 @@ class _RidesScreenState extends State<RidesScreen> {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  isTooFar ? Icons.directions_walk_rounded : Icons.error_outline_rounded,
+                  isTooFar
+                      ? Icons.directions_walk_rounded
+                      : Icons.error_outline_rounded,
                   color: isTooFar ? _C.amber : _C.red,
                   size: 28,
                 ),
@@ -2757,9 +4108,10 @@ class _RidesScreenState extends State<RidesScreen> {
               Text(
                 isTooFar ? 'You\'re Not Near the Stop' : 'Action Failed',
                 style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: _C.textPrimary),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: _C.textPrimary,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
@@ -2769,7 +4121,11 @@ class _RidesScreenState extends State<RidesScreen> {
                 isTooFar
                     ? 'Please make your way to the passenger\'s pickup location before boarding.\n\nUse the Navigate button to get directions.'
                     : message,
-                style: GoogleFonts.poppins(fontSize: 13, color: _C.textSecondary, height: 1.5),
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: _C.textSecondary,
+                  height: 1.5,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
@@ -2782,30 +4138,44 @@ class _RidesScreenState extends State<RidesScreen> {
                       onPressed: () => Navigator.pop(c),
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: _C.border),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                         padding: const EdgeInsets.symmetric(vertical: 11),
                       ),
-                      child: Text('Dismiss',
-                          style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                              color: _C.textSecondary)),
+                      child: Text(
+                        'Dismiss',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: _C.textSecondary,
+                        ),
+                      ),
                     ),
                   ),
-                  if (isTooFar) ...[ 
+                  if (isTooFar) ...[
                     const SizedBox(width: 10),
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () => Navigator.pop(c),
-                        icon: const Icon(Icons.navigation_rounded, size: 15, color: Colors.white),
-                        label: Text('Navigate',
-                            style: GoogleFonts.poppins(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                                color: Colors.white)),
+                        icon: const Icon(
+                          Icons.navigation_rounded,
+                          size: 15,
+                          color: Colors.white,
+                        ),
+                        label: Text(
+                          'Navigate',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Colors.white,
+                          ),
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _C.blue,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 11),
                           elevation: 0,
                         ),
@@ -2829,11 +4199,13 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-
-
   Future<void> _openExternalMap(double lat, double lng, String? address) async {
-    final Uri directionsUrl = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
-    final Uri geoUrl = Uri.parse('geo:$lat,$lng?q=$lat,$lng${address != null ? "($address)" : ""}');
+    final Uri directionsUrl = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng',
+    );
+    final Uri geoUrl = Uri.parse(
+      'geo:$lat,$lng?q=$lat,$lng${address != null ? "($address)" : ""}',
+    );
     try {
       if (await canLaunchUrl(directionsUrl)) {
         await launchUrl(directionsUrl, mode: LaunchMode.externalApplication);
@@ -2854,7 +4226,7 @@ class _RidesScreenState extends State<RidesScreen> {
       final parts = timeStr.split(':');
       if (parts.length >= 2) {
         final hour = int.parse(parts[0]);
-        final min  = parts[1];
+        final min = parts[1];
         final ampm = hour >= 12 ? 'PM' : 'AM';
         final displayHour = hour % 12 == 0 ? 12 : hour % 12;
         return '$displayHour:$min $ampm';
@@ -2863,6 +4235,14 @@ class _RidesScreenState extends State<RidesScreen> {
     } catch (_) {
       return timeStr;
     }
+  }
+
+  String _stopEta(dynamic stop, dynamic route) {
+    return selectDriverEta(
+          Map<String, dynamic>.from(stop as Map),
+          logType: route['log_type']?.toString(),
+        ) ??
+        '';
   }
 }
 
@@ -2884,9 +4264,13 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
   void initState() {
     super.initState();
     _controller = TextEditingController();
-    _focusNode  = FocusNode();
-    _focusNode.addListener(() { if (mounted) setState(() {}); });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
+    _focusNode = FocusNode();
+    _focusNode.addListener(() {
+      if (mounted) setState(() {});
+    });
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _focusNode.requestFocus(),
+    );
   }
 
   @override
@@ -2898,8 +4282,8 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
 
   @override
   Widget build(BuildContext context) {
-    final String otp       = _controller.text;
-    final bool   isComplete = otp.length == 4;
+    final String otp = _controller.text;
+    final bool isComplete = otp.length == 4;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -2917,19 +4301,35 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E6BFF).withValues(alpha: 0.08),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFF1E6BFF).withValues(alpha: 0.15), width: 2),
+                  border: Border.all(
+                    color: const Color(0xFF1E6BFF).withValues(alpha: 0.15),
+                    width: 2,
+                  ),
                 ),
-                child: const Icon(Icons.lock_open_rounded, color: Color(0xFF1E6BFF), size: 34),
+                child: const Icon(
+                  Icons.lock_open_rounded,
+                  color: Color(0xFF1E6BFF),
+                  size: 34,
+                ),
               ),
               const SizedBox(height: 18),
-              Text('Security Verification',
-                  style: GoogleFonts.poppins(
-                      fontSize: 18, fontWeight: FontWeight.bold, color: _C.textPrimary)),
+              Text(
+                'Security Verification',
+                style: GoogleFonts.poppins(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: _C.textPrimary,
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
                 'Enter the verification code for ${widget.employeeName} to confirm.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(fontSize: 13, color: _C.textSecondary, height: 1.5),
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: _C.textSecondary,
+                  height: 1.5,
+                ),
               ),
               const SizedBox(height: 26),
               GestureDetector(
@@ -2956,9 +4356,10 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: List.generate(4, (index) {
-                          final bool isFocused = otp.length == index && _focusNode.hasFocus;
-                          final bool hasValue  = otp.length > index;
-                          final String digit   = hasValue ? otp[index] : '';
+                          final bool isFocused =
+                              otp.length == index && _focusNode.hasFocus;
+                          final bool hasValue = otp.length > index;
+                          final String digit = hasValue ? otp[index] : '';
 
                           return Container(
                             width: 52,
@@ -2967,17 +4368,30 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
                               color: const Color(0xFFF8FAFC),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: isFocused ? _C.blue : const Color(0xFFE2E8F0),
+                                color: isFocused
+                                    ? _C.blue
+                                    : const Color(0xFFE2E8F0),
                                 width: isFocused ? 2.0 : 1.5,
                               ),
                               boxShadow: isFocused
-                                  ? [BoxShadow(color: _C.blue.withValues(alpha: 0.12), blurRadius: 8, offset: const Offset(0, 4))]
+                                  ? [
+                                      BoxShadow(
+                                        color: _C.blue.withValues(alpha: 0.12),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ]
                                   : null,
                             ),
                             alignment: Alignment.center,
-                            child: Text(digit,
-                                style: GoogleFonts.poppins(
-                                    fontSize: 22, fontWeight: FontWeight.bold, color: _C.textPrimary)),
+                            child: Text(
+                              digit,
+                              style: GoogleFonts.poppins(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: _C.textPrimary,
+                              ),
+                            ),
                           );
                         }),
                       ),
@@ -2992,32 +4406,53 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(context, null),
                       style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFFE2E8F0), width: 1.5),
+                        side: const BorderSide(
+                          color: Color(0xFFE2E8F0),
+                          width: 1.5,
+                        ),
                         padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      child: Text('Cancel',
-                          style: GoogleFonts.poppins(
-                              fontSize: 13.5, fontWeight: FontWeight.bold, color: _C.textSecondary)),
+                      child: Text(
+                        'Cancel',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          color: _C.textSecondary,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: isComplete ? () => Navigator.pop(context, otp) : null,
+                      onPressed: isComplete
+                          ? () => Navigator.pop(context, otp)
+                          : null,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: isComplete ? _C.blue : const Color(0xFFE2E8F0),
+                        backgroundColor: isComplete
+                            ? _C.blue
+                            : const Color(0xFFE2E8F0),
                         disabledBackgroundColor: const Color(0xFFE2E8F0),
                         foregroundColor: Colors.white,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      child: Text('Verify',
-                          style: GoogleFonts.poppins(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.bold,
-                              color: isComplete ? Colors.white : const Color(0xFF94A3B8))),
+                      child: Text(
+                        'Verify',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          color: isComplete
+                              ? Colors.white
+                              : const Color(0xFF94A3B8),
+                        ),
+                      ),
                     ),
                   ),
                 ],

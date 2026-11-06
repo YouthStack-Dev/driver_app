@@ -454,6 +454,12 @@ class LocationForegroundService : Service() {
 
             while (coroutineContext.isActive) {
                 val queued = dbHelper.getOldestLocation() ?: break
+                val activeRouteId = prefs.getString(KEY_ROUTE_ID, "") ?: ""
+                if (queued.routeId != activeRouteId) {
+                    Log.i(TAG, "Dropping queued location for stale route ${queued.routeId}")
+                    dbHelper.deleteLocation(queued.id)
+                    continue
+                }
                 val success = sendLocationPingWithRefresh(queued)
                 if (success) {
                     dbHelper.deleteLocation(queued.id)
@@ -486,10 +492,22 @@ class LocationForegroundService : Service() {
 
         val httpResult = executeLocationPing(queued, tokens.accessToken)
         if (httpResult == null) return false
+        if (isRouteNotOngoing(httpResult)) {
+            // Do not retry a completed route. Flutter will reconcile the next
+            // active route and update KEY_ROUTE_ID through the bridge.
+            Log.w(TAG, "Route ${queued.routeId} is no longer ongoing — clearing native route state")
+            prefs.edit().putString(KEY_ROUTE_ID, "").apply()
+            return true
+        }
         if (httpResult.statusCode != 401) return false
 
         Log.i(TAG, "Location upload received 401 — attempting token refresh")
         return performLocationRefreshRetry(queued, tokens.accessToken, httpResult)
+    }
+
+    private fun isRouteNotOngoing(result: NativeAuthHttpClient.HttpResult): Boolean {
+        val body = result.responseBody.uppercase()
+        return body.contains("ROUTE_NOT_ONGOING")
     }
 
     private suspend fun performLocationRefreshRetry(

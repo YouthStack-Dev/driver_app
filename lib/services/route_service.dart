@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:logger/logger.dart';
 import '../config/constants.dart';
 import 'api_client.dart';
+import '../models/driver_current_state.dart';
 
 class RouteService {
   final Dio _dio = ApiClient().client;
@@ -12,36 +13,58 @@ class RouteService {
   factory RouteService() => _instance;
   RouteService._internal();
 
-  /// Fetch Driver Trips
-  Future<Map<String, dynamic>> getDriverTrips({String statusFilter = 'upcoming', String? bookingDate}) async {
+  Future<Map<String, dynamic>> getCurrentState() async {
     try {
-      final queryParams = <String, dynamic>{
-        'status_filter': statusFilter,
+      final response = await _dio.get('/api/v1/driver/current-state');
+      final body = response.data;
+      final data = body is Map && body['data'] is Map ? body['data'] : body;
+      if (data is! Map) {
+        return {'success': false, 'error': 'Invalid current-state response'};
+      }
+      return {
+        'success': true,
+        'state': DriverCurrentState.fromJson(Map<String, dynamic>.from(data)),
       };
+    } on DioException catch (e) {
+      _logger.e('Failed to fetch current driver state', error: e);
+      return _handleError(e);
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Fetch Driver Trips
+  Future<Map<String, dynamic>> getDriverTrips({
+    String statusFilter = 'upcoming',
+    String? bookingDate,
+  }) async {
+    try {
+      final queryParams = <String, dynamic>{'status_filter': statusFilter};
 
       if (bookingDate != null) {
         queryParams['booking_date'] = bookingDate;
       } else if (statusFilter == 'upcoming') {
         final now = DateTime.now();
-        final formatted = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+        final formatted =
+            "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
         queryParams['booking_date'] = formatted;
       }
 
       _logger.i('Fetching trips: $queryParams');
 
-      final response = await _dio.get(ApiEndpoints.driverTrips, queryParameters: queryParams);
-      
+      final response = await _dio.get(
+        ApiEndpoints.driverTrips,
+        queryParameters: queryParams,
+      );
+
       // RN: result.routes = res.data.data.routes
       final data = response.data['data'];
-      final routes = (data is Map<String, dynamic> && data.containsKey('routes')) 
-          ? data['routes'] 
+      final routes =
+          (data is Map<String, dynamic> && data.containsKey('routes'))
+          ? data['routes']
           : (data is List ? data : []); // Fallback if API changes
-          
-      return {
-        'success': true,
-        'routes': routes is List ? routes : []
-      };
 
+      return {'success': true, 'routes': routes is List ? routes : []};
     } on DioException catch (e) {
       _logger.e('Failed to fetch trips', error: e);
       return _handleError(e);
@@ -51,16 +74,24 @@ class RouteService {
   }
 
   /// Fetch Employee Bookings (My Schedules for Employee/Driver)
-  Future<Map<String, dynamic>> getEmployeeBookings({required Map<String, dynamic> params}) async {
+  Future<Map<String, dynamic>> getEmployeeBookings({
+    required Map<String, dynamic> params,
+  }) async {
     try {
       _logger.i('Fetching bookings: $params');
-      final response = await _dio.get(ApiEndpoints.bookings, queryParameters: params);
-      
-      final data = response.data['data']; // Assuming standard response structure
+      final response = await _dio.get(
+        ApiEndpoints.bookings,
+        queryParameters: params,
+      );
+
+      final data =
+          response.data['data']; // Assuming standard response structure
       // RN app expects result.bookings
       return {
         'success': true,
-        'bookings': data is List ? data : (data['bookings'] is List ? data['bookings'] : [])
+        'bookings': data is List
+            ? data
+            : (data['bookings'] is List ? data['bookings'] : []),
       };
     } on DioException catch (e) {
       _logger.e('Failed to fetch bookings', error: e);
@@ -89,7 +120,7 @@ class RouteService {
   Future<Map<String, dynamic>> endDuty(String routeId, String? reason) async {
     try {
       _logger.i('Ending duty for route: $routeId');
-      
+
       final params = {'route_id': routeId};
       if (reason != null) params['reason'] = reason;
 
@@ -119,7 +150,7 @@ class RouteService {
   }) async {
     try {
       _logger.i('Starting trip (Pickup) for booking: $bookingId');
-      
+
       final params = <String, dynamic>{
         'route_id': routeId,
         'booking_id': bookingId,
@@ -155,7 +186,7 @@ class RouteService {
   }) async {
     try {
       _logger.i('Dropping passenger for booking: $bookingId');
-      
+
       final params = <String, dynamic>{
         'route_id': routeId,
         'booking_id': bookingId,
@@ -184,7 +215,7 @@ class RouteService {
   }) async {
     try {
       _logger.i('Marking No Show for booking: $bookingId');
-      
+
       final params = {
         'route_id': routeId,
         'booking_id': bookingId,
@@ -247,9 +278,10 @@ class RouteService {
   Future<Map<String, dynamic>> cancelBooking(String bookingId) async {
     try {
       _logger.i('Cancelling booking: $bookingId');
-      final response = await _dio.post(ApiEndpoints.cancelBooking, data: {
-        'booking_id': bookingId,
-      });
+      final response = await _dio.post(
+        ApiEndpoints.cancelBooking,
+        data: {'booking_id': bookingId},
+      );
       return {'success': true, 'data': response.data};
     } on DioException catch (e) {
       return _handleError(e);
@@ -262,10 +294,7 @@ class RouteService {
     required String endDate,
   }) async {
     try {
-      final queryParams = {
-        'start_date': startDate,
-        'end_date': endDate,
-      };
+      final queryParams = {'start_date': startDate, 'end_date': endDate};
 
       _logger.i('Fetching history report: $queryParams');
       final response = await _dio.get(
@@ -285,7 +314,9 @@ class RouteService {
 
       return {
         'success': false,
-        'error': (responseData is Map ? responseData['message'] : null) ?? 'Failed to load report',
+        'error':
+            (responseData is Map ? responseData['message'] : null) ??
+            'Failed to load report',
       };
     } on DioException catch (e) {
       _logger.e('Failed to fetch history report', error: e);
@@ -354,8 +385,8 @@ class RouteService {
       error = 'Server error. Please try again later.';
       errorCode = 'SERVER_ERROR';
     } else if (e.type == DioExceptionType.connectionTimeout ||
-               e.type == DioExceptionType.receiveTimeout ||
-               e.type == DioExceptionType.sendTimeout) {
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.sendTimeout) {
       error = 'Connection timed out. Please check your network.';
       errorCode = 'TIMEOUT';
     } else if (e.type == DioExceptionType.connectionError) {
@@ -367,20 +398,22 @@ class RouteService {
     if (e.response?.data != null) {
       final data = e.response?.data;
       if (data is Map) {
-         if (data.containsKey('detail')) {
-           final detail = data['detail'];
-           if (detail is List) {
-             error = detail.map((e) => "${e['loc']?.last}: ${e['msg']}").join(', ');
-           } else if (detail is Map) {
-             error = detail['message'] ?? error;
-           } else if (detail is String && detail.isNotEmpty) {
-             error = detail;
-           }
-         } else {
-           final msg = data['message'] ?? data['error'];
-           if (msg is String && msg.isNotEmpty) error = msg;
-         }
-         errorCode = data['code'] ?? data['error_code'] ?? errorCode;
+        if (data.containsKey('detail')) {
+          final detail = data['detail'];
+          if (detail is List) {
+            error = detail
+                .map((e) => "${e['loc']?.last}: ${e['msg']}")
+                .join(', ');
+          } else if (detail is Map) {
+            error = detail['message'] ?? error;
+          } else if (detail is String && detail.isNotEmpty) {
+            error = detail;
+          }
+        } else {
+          final msg = data['message'] ?? data['error'];
+          if (msg is String && msg.isNotEmpty) error = msg;
+        }
+        errorCode = data['code'] ?? data['error_code'] ?? errorCode;
       }
     }
     return {'success': false, 'error': error, 'errorCode': errorCode};
