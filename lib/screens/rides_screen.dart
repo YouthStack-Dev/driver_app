@@ -749,13 +749,15 @@ class _RidesScreenState extends State<RidesScreen> {
     final currentState = provider.currentState;
     final isCurrentStateRoute =
         currentState?.route?.routeId?.toString() == routeId?.toString();
-    final bool isOngoing = currentState != null
-        ? isCurrentStateRoute && currentState.dutyStatus == 'ON_DUTY'
+    final bool matchesState = currentState != null && isCurrentStateRoute;
+
+    final bool isOngoing = matchesState
+        ? currentState.dutyStatus == 'ON_DUTY'
         : route['status'] == 'Ongoing';
-    final bool isAssigned = currentState != null
-        ? isCurrentStateRoute && currentState.dutyStatus == 'DUTY_ASSIGNED'
+    final bool isAssigned = matchesState
+        ? currentState.dutyStatus == 'DUTY_ASSIGNED'
         : route['status'] == 'Driver Assigned';
-    if (currentState != null) {
+    if (matchesState) {
       route = {
         ...route,
         'status': isOngoing
@@ -770,7 +772,7 @@ class _RidesScreenState extends State<RidesScreen> {
     final bool hasEscort =
         route['assigned_escort_id'] != null ||
         route['has_escort'] == true ||
-        route['escort_required'] == true;
+        route['assigned_escort'] != null;
     final bool escortBoarded =
         route['escort_boarded'] == true || route['escort_status'] == 'Boarded';
     final bool showEscortBoard = isOngoing && hasEscort && !escortBoarded;
@@ -833,28 +835,33 @@ class _RidesScreenState extends State<RidesScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Route number + collapse icon
                         Row(
                           children: [
-                            Text(
-                              'Route #$routeId',
-                              style: GoogleFonts.poppins(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 16,
-                                color: _C.textPrimary,
+                            Expanded(
+                              child: Text(
+                                'Route #$routeId',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                  color: _C.textPrimary,
+                                ),
                               ),
                             ),
-                            if (hasEscort) ...[
-                              const SizedBox(width: 6),
-                              _buildChip(
-                                'ESCORT',
-                                _C.tealBg,
-                                _C.teal,
-                                icon: Icons.security_rounded,
-                              ),
-                            ],
+                            const SizedBox(width: 6),
+                            Icon(
+                              isCollapsed
+                                  ? Icons.keyboard_arrow_down_rounded
+                                  : Icons.keyboard_arrow_up_rounded,
+                              color: _C.textSecondary,
+                              size: 22,
+                            ),
                           ],
                         ),
                         const SizedBox(height: 5),
+                        // Pickup/Drop + shift time
                         Row(
                           children: [
                             _buildChip(
@@ -869,36 +876,54 @@ class _RidesScreenState extends State<RidesScreen> {
                               color: _C.textSecondary,
                             ),
                             const SizedBox(width: 3),
-                            Text(
-                              shiftTime,
-                              style: GoogleFonts.poppins(
-                                color: _C.textSecondary,
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
+                            Flexible(
+                              child: Text(
+                                shiftTime,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(
+                                  color: _C.textSecondary,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ],
                         ),
+                        // ESCORT / ON DUTY / ASSIGNED badges
+                        if (hasEscort || isOngoing || isAssigned) ...[
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (hasEscort)
+                                _buildChip(
+                                  'ESCORT',
+                                  _C.tealBg,
+                                  _C.teal,
+                                  icon: Icons.security_rounded,
+                                ),
+                              if (isOngoing)
+                                _buildChip(
+                                  'ON DUTY',
+                                  _C.greenBg,
+                                  _C.green,
+                                  dot: true,
+                                )
+                              else if (isAssigned)
+                                _buildChip(
+                                  'ASSIGNED',
+                                  _C.blueBg,
+                                  _C.blue,
+                                  dot: true,
+                                ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
-                  ),
-                  // ON DUTY / ASSIGNED badge + Collapse Icon
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (isOngoing)
-                        _buildChip('ON DUTY', _C.greenBg, _C.green, dot: true)
-                      else if (isAssigned)
-                        _buildChip('ASSIGNED', _C.blueBg, _C.blue, dot: true),
-                      const SizedBox(width: 6),
-                      Icon(
-                        isCollapsed
-                            ? Icons.keyboard_arrow_down_rounded
-                            : Icons.keyboard_arrow_up_rounded,
-                        color: _C.textSecondary,
-                        size: 22,
-                      ),
-                    ],
                   ),
                 ],
               ),
@@ -2614,7 +2639,7 @@ class _RidesScreenState extends State<RidesScreen> {
     final bool hasEscort =
         route['assigned_escort_id'] != null ||
         route['has_escort'] == true ||
-        route['escort_required'] == true;
+        route['assigned_escort'] != null;
     final bool escortBoarded =
         route['escort_boarded'] == true || route['escort_status'] == 'Boarded';
     final bool isEscortPending = hasEscort && !escortBoarded;
