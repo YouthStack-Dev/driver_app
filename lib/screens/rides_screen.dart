@@ -80,12 +80,7 @@ class _RidesScreenState extends State<RidesScreen> {
   Future<void> _fetchRoutes() async {
     if (!mounted) return;
     final provider = Provider.of<BookingProvider>(context, listen: false);
-    await provider.fetchTrips(status: 'ongoing');
-    if (!mounted) return;
-    if (provider.routes.isEmpty) {
-      await provider.fetchTrips(status: 'upcoming');
-    }
-    await provider.refreshCurrentState();
+    await provider.refreshTripsAfterStateUpdate();
   }
 
   @override
@@ -589,7 +584,14 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
+  bool _isDutyNotActiveRouteError(String? error) {
+    final normalized = error?.trim().toLowerCase() ?? '';
+    return normalized ==
+        'route must be in ongoing state. please start duty first.';
+  }
+
   Widget _buildErrorState(String error) {
+    final bool dutyNotActive = _isDutyNotActiveRouteError(error);
     return Container(
       margin: const EdgeInsets.only(top: 40),
       padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
@@ -602,19 +604,21 @@ class _RidesScreenState extends State<RidesScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: const BoxDecoration(
-              color: _C.redBg,
+            decoration: BoxDecoration(
+              color: dutyNotActive ? _C.blueBg : _C.redBg,
               shape: BoxShape.circle,
             ),
-            child: const Icon(
-              Icons.error_outline_rounded,
-              color: _C.red,
+            child: Icon(
+              dutyNotActive
+                  ? Icons.route_outlined
+                  : Icons.error_outline_rounded,
+              color: dutyNotActive ? _C.blue : _C.red,
               size: 32,
             ),
           ),
           const SizedBox(height: 16),
           Text(
-            'Failed to load routes',
+            dutyNotActive ? 'No Active Route' : 'Failed to load routes',
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.bold,
               fontSize: 16,
@@ -623,7 +627,9 @@ class _RidesScreenState extends State<RidesScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            error,
+            dutyNotActive
+                ? "Your duty isn't active right now. Start a duty to load or continue routes."
+                : error,
             textAlign: TextAlign.center,
             style: GoogleFonts.poppins(fontSize: 13, color: _C.textSecondary),
           ),
@@ -1102,7 +1108,23 @@ class _RidesScreenState extends State<RidesScreen> {
                                   firstStop['pickup_longitude'];
                               final String officeAddress =
                                   firstStop['pickup_location'] ?? 'Office';
-                              if (officeLat != null && officeLng != null) {
+                              final bool duplicateOfficePickup = stops.any((
+                                stop,
+                              ) {
+                                final bool sameText =
+                                    _normalizedAddress(officeAddress) ==
+                                    _normalizedAddress(stop['pickup_location']);
+                                final bool samePoint = _sameCoordinates(
+                                  officeLat,
+                                  officeLng,
+                                  stop['pickup_latitude'],
+                                  stop['pickup_longitude'],
+                                );
+                                return sameText || samePoint;
+                              });
+                              if (officeLat != null &&
+                                  officeLng != null &&
+                                  !duplicateOfficePickup) {
                                 return Padding(
                                   padding: const EdgeInsets.only(bottom: 12),
                                   child: Container(
@@ -1486,7 +1508,8 @@ class _RidesScreenState extends State<RidesScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               child: ElevatedButton.icon(
-                onPressed: () => _handleEscortBoard(routeId, provider),
+                onPressed: () =>
+                    _handleEscortBoard(routeId.toString(), provider),
                 icon: const Icon(
                   Icons.security_rounded,
                   size: 18,
@@ -1782,13 +1805,14 @@ class _RidesScreenState extends State<RidesScreen> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                // Name + phone block
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         passengerName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(
                           fontWeight: FontWeight.bold,
                           fontSize: 18,
@@ -1798,104 +1822,138 @@ class _RidesScreenState extends State<RidesScreen> {
                       ),
                       if (eta.isNotEmpty || isOtpRequired) ...[
                         const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            if (eta.isNotEmpty)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _C.blueBg,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.access_time_rounded,
-                                      size: 11,
-                                      color: _C.blue,
+                        LayoutBuilder(
+                          builder: (badgeContext, badgeConstraints) {
+                            final double badgeMaxWidth =
+                                badgeConstraints.maxWidth;
+                            final double badgeTextMaxWidth =
+                                (badgeMaxWidth - 40)
+                                    .clamp(60.0, 150.0)
+                                    .toDouble();
+                            return Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                if (eta.isNotEmpty)
+                                  Container(
+                                    constraints: BoxConstraints(
+                                      maxWidth: badgeMaxWidth,
                                     ),
-                                    const SizedBox(width: 4),
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _C.blueBg,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Text(
-                                          'ETA',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 8,
-                                            color: _C.blue,
-                                            fontWeight: FontWeight.bold,
-                                          ),
+                                        const Icon(
+                                          Icons.access_time_rounded,
+                                          size: 11,
+                                          color: _C.blue,
                                         ),
-                                        Text(
-                                          _formatTime(eta),
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 10,
-                                            color: _C.blue,
-                                            fontWeight: FontWeight.bold,
+                                        const SizedBox(width: 4),
+                                        Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              'ETA',
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 8,
+                                                color: _C.blue,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                maxWidth: badgeTextMaxWidth,
+                                              ),
+                                              child: Text(
+                                                _formatTime(eta),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 10,
+                                                  color: _C.blue,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                if (isOtpRequired &&
+                                    ![
+                                      'NoShow',
+                                      'No Show',
+                                      'No-Show',
+                                    ].contains(status))
+                                  Container(
+                                    constraints: BoxConstraints(
+                                      maxWidth: badgeMaxWidth,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _C.amberBg,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: _C.amber.withValues(alpha: 0.3),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.lock_rounded,
+                                          size: 10,
+                                          color: _C.amber,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        ConstrainedBox(
+                                          constraints: BoxConstraints(
+                                            maxWidth: badgeTextMaxWidth,
+                                          ),
+                                          child: Text(
+                                            'OTP Required',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 9.5,
+                                              color: _C.amber,
+                                              fontWeight: FontWeight.bold,
+                                            ),
                                           ),
                                         ),
                                       ],
                                     ),
-                                  ],
-                                ),
-                              ),
-                            if (isOtpRequired &&
-                                ![
-                                  'NoShow',
-                                  'No Show',
-                                  'No-Show',
-                                ].contains(status)) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _C.amberBg,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: _C.amber.withValues(alpha: 0.3),
                                   ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.lock_rounded,
-                                      size: 10,
-                                      color: _C.amber,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'OTP',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 9.5,
-                                        color: _C.amber,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ],
+                              ],
+                            );
+                          },
                         ),
                       ],
                     ],
                   ),
                 ),
-                // Status badge top-right + combined call & chat row
+                const SizedBox(width: 8),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     _buildStatusBadge(status),
-                    const SizedBox(height: 8),
-                    // Combined Call + Chat mini-row
-                    _buildCallChatRow(stop, phone),
+                    if (phone.isNotEmpty || stop['booking_id'] != null) ...[
+                      const SizedBox(height: 6),
+                      _buildCallChatRow(stop, phone, hitSize: 48),
+                    ],
                   ],
                 ),
               ],
@@ -2348,203 +2406,296 @@ class _RidesScreenState extends State<RidesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Index
-              Container(
-                width: 28,
-                height: 28,
-                margin: const EdgeInsets.only(right: 8),
-                decoration: BoxDecoration(color: _C.bg, shape: BoxShape.circle),
-                alignment: Alignment.center,
-                child: Text(
-                  '${index + 1}',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11,
-                    color: _C.textSecondary,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Index
+                  Container(
+                    width: 28,
+                    height: 28,
+                    margin: const EdgeInsets.only(right: 8),
+                    decoration: BoxDecoration(
+                      color: _C.bg,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '${index + 1}',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        color: _C.textSecondary,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              // Avatar
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: avatarColor.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  initial,
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: avatarColor,
+                  // Avatar
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: avatarColor.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      initial,
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: avatarColor,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
                       passengerName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.bold,
                         fontSize: 13.5,
                         color: _C.textPrimary,
                       ),
                     ),
-                    if (address.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              address,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.poppins(
-                                fontSize: 11,
-                                color: _C.textSecondary,
-                              ),
-                            ),
-                          ),
-                          if (lat != null && lng != null) ...[
-                            const SizedBox(width: 6),
-                            _iconAction(
-                              icon: Icons.directions_rounded,
-                              color: _C.teal,
-                              bg: _C.tealBg,
-                              onTap: () => _openExternalMap(lat, lng, address),
-                            ),
-                          ],
-                        ],
+                  ),
+                  const SizedBox(width: 8),
+                  _buildStatusBadge(isBoarded ? 'Ongoing' : status),
+                ],
+              ),
+              if ((phone.isNotEmpty || stop['booking_id'] != null) ||
+                  (!isCompleted &&
+                      !isBoarded &&
+                      (eta.isNotEmpty ||
+                          isOtpRequired ||
+                          stop['estimated_distance'] != null))) ...[
+                const SizedBox(height: 6),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child:
+                          !isCompleted &&
+                              !isBoarded &&
+                              (eta.isNotEmpty ||
+                                  isOtpRequired ||
+                                  stop['estimated_distance'] != null)
+                          ? LayoutBuilder(
+                              builder: (badgeContext, badgeConstraints) {
+                                final double badgeMaxWidth =
+                                    badgeConstraints.maxWidth;
+                                final double badgeTextMaxWidth =
+                                    (badgeMaxWidth - 30)
+                                        .clamp(60.0, 190.0)
+                                        .toDouble();
+                                final double etaTextMaxWidth =
+                                    (badgeMaxWidth - 34)
+                                        .clamp(60.0, 190.0)
+                                        .toDouble();
+                                return Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: [
+                                    if (eta.isNotEmpty)
+                                      Container(
+                                        constraints: BoxConstraints(
+                                          maxWidth: badgeMaxWidth,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 7,
+                                          vertical: 3,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: _C.blueBg,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.access_time_rounded,
+                                              size: 10,
+                                              color: _C.blue,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                maxWidth: etaTextMaxWidth,
+                                              ),
+                                              child: Text(
+                                                'ETA: ${_formatTime(eta)}',
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 10,
+                                                  color: _C.blue,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    if (isOtpRequired)
+                                      Container(
+                                        constraints: BoxConstraints(
+                                          maxWidth: badgeMaxWidth,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 7,
+                                          vertical: 3,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: _C.amberBg,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          border: Border.all(
+                                            color: _C.amber.withValues(
+                                              alpha: 0.3,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.lock_rounded,
+                                              size: 10,
+                                              color: _C.amber,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                maxWidth: badgeTextMaxWidth,
+                                              ),
+                                              child: Text(
+                                                'OTP Required',
+                                                overflow: TextOverflow.ellipsis,
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 9.5,
+                                                  color: _C.amber,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    if (stop['estimated_distance'] != null)
+                                      Container(
+                                        constraints: BoxConstraints(
+                                          maxWidth: badgeMaxWidth,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 7,
+                                          vertical: 3,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: _C.bg,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          border: Border.all(color: _C.border),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.map_rounded,
+                                              size: 10,
+                                              color: _C.textSecondary,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                maxWidth: badgeTextMaxWidth,
+                                              ),
+                                              child: Text(
+                                                '${stop['estimated_distance']} km',
+                                                overflow: TextOverflow.ellipsis,
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 9.5,
+                                                  color: _C.textSecondary,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              },
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    if (phone.isNotEmpty || stop['booking_id'] != null) ...[
+                      const SizedBox(width: 8),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [_buildCallChatRow(stop, phone, hitSize: 48)],
                       ),
                     ],
                   ],
                 ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _buildStatusBadge(isBoarded ? 'Ongoing' : status),
-                  const SizedBox(height: 6),
-                  _buildCallChatRow(stop, phone),
-                ],
-              ),
+              ],
             ],
           ),
-          if (!isCompleted &&
-              !isBoarded &&
-              (eta.isNotEmpty ||
-                  isOtpRequired ||
-                  stop['estimated_distance'] != null)) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
+          const SizedBox(height: 10),
+          Container(
+            decoration: BoxDecoration(
+              color: _C.bg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _C.border),
+            ),
+            padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                if (eta.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _C.blueBg,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.access_time_rounded,
-                          size: 10,
-                          color: _C.blue,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'ETA: ${_formatTime(eta)}',
-                          style: GoogleFonts.poppins(
-                            fontSize: 10,
-                            color: _C.blue,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (isOtpRequired)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _C.amberBg,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: _C.amber.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.lock_rounded,
-                          size: 10,
-                          color: _C.amber,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'OTP Required',
-                          style: GoogleFonts.poppins(
-                            fontSize: 9.5,
-                            color: _C.amber,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (stop['estimated_distance'] != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _C.bg,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: _C.border),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.map_rounded,
-                          size: 10,
+                const Icon(Icons.location_on_rounded, color: _C.blue, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isBoarded ? 'Drop Address' : 'Pickup Address',
+                        style: GoogleFonts.poppins(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
                           color: _C.textSecondary,
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${stop['estimated_distance']} km',
-                          style: GoogleFonts.poppins(
-                            fontSize: 9.5,
-                            color: _C.textSecondary,
-                            fontWeight: FontWeight.bold,
-                          ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        address,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          color: _C.textPrimary,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+                ),
+                if (lat != null && lng != null) ...[
+                  const SizedBox(width: 8),
+                  _iconAction(
+                    icon: Icons.directions_rounded,
+                    color: _C.teal,
+                    bg: _C.tealBg,
+                    onTap: () => _openExternalMap(lat, lng, address),
+                    hitSize: 48,
+                  ),
+                ],
               ],
             ),
-          ],
+          ),
           if (status == 'Scheduled') ...[
             const SizedBox(height: 10),
             Row(
@@ -3149,8 +3300,9 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  /// Combined Call + Chat icon row displayed in the passenger card top-right.
-  Widget _buildCallChatRow(dynamic stop, String phone) {
+  /// Combined Call + Chat action row for passenger cards.
+  Widget _buildCallChatRow(dynamic stop, String phone, {double hitSize = 32}) {
+    final double spacing = hitSize > 32 ? 0 : 6;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -3159,18 +3311,20 @@ class _RidesScreenState extends State<RidesScreen> {
             icon: Icons.phone_rounded,
             color: _C.green,
             bg: _C.greenBg,
+            hitSize: hitSize,
             onTap: () async {
               final url = Uri.parse('tel:$phone');
               if (await canLaunchUrl(url)) await launchUrl(url);
             },
           ),
-        if (phone.isNotEmpty && stop['booking_id'] != null)
-          const SizedBox(width: 6),
+        if (phone.isNotEmpty && stop['booking_id'] != null && spacing > 0)
+          SizedBox(width: spacing),
         if (stop['booking_id'] != null)
           _iconAction(
             icon: Icons.chat_bubble_outline_rounded,
             color: _C.blue,
             bg: _C.blueBg,
+            hitSize: hitSize,
             onTap: () {
               final bookingId = stop['booking_id'];
               final int? id = bookingId is int
@@ -3200,19 +3354,26 @@ class _RidesScreenState extends State<RidesScreen> {
     required Color color,
     required Color bg,
     required VoidCallback onTap,
+    double hitSize = 32,
   }) {
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: onTap,
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: bg,
-          shape: BoxShape.circle,
-          border: Border.all(color: color.withValues(alpha: 0.3)),
+      child: SizedBox(
+        width: hitSize,
+        height: hitSize,
+        child: Center(
+          child: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: bg,
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Icon(icon, size: 15, color: color),
+          ),
         ),
-        child: Icon(icon, size: 15, color: color),
       ),
     );
   }
@@ -3384,6 +3545,8 @@ class _RidesScreenState extends State<RidesScreen> {
     String routeId,
     BookingProvider provider,
   ) async {
+    if (provider.isLoading) return;
+
     // Try without code first (handles `off` mode — board immediately).
     var result = await provider.escortBoard(routeId);
     if (!mounted) return;
@@ -3397,7 +3560,12 @@ class _RidesScreenState extends State<RidesScreen> {
 
     // Code required — show dialog for `universal` / `unique` modes.
     if (result['errorCode'] == 'CODE_REQUIRED') {
-      final code = await _showOtpDialog(context, 'Escort');
+      final code = await _showOtpDialog(
+        context,
+        'Escort',
+        minLength: 4,
+        maxLength: 6,
+      );
       if (code == null || !mounted) return;
       result = await provider.escortBoard(routeId, code: code);
       if (!mounted) return;
@@ -3413,7 +3581,7 @@ class _RidesScreenState extends State<RidesScreen> {
     final errorCode = result['errorCode'];
     if (errorCode == 'INVALID_ESCORT_CODE' ||
         errorCode == 'INVALID_ESCORT_OTP') {
-      _showInvalidCodeDialog();
+      _showInvalidCodeDialog(result['error']?.toString());
     } else {
       _showErrorDialog(result['error'] ?? 'Failed to board escort');
     }
@@ -3707,11 +3875,12 @@ class _RidesScreenState extends State<RidesScreen> {
       context,
       listen: false,
     );
-    final pos = await locationProvider.getCurrentLocation();
-    if (pos == null) {
-      if (mounted) _showErrorDialog('Location not valid');
+    final locationResult = await locationProvider.getFreshActionLocation();
+    if (!locationResult.isValid) {
+      if (mounted) _showErrorDialog(locationResult.message);
       return;
     }
+    final pos = locationResult.position!;
     final result = await provider.startTrip(
       route['route_id'].toString(),
       stop['booking_id'].toString(),
@@ -3720,7 +3889,11 @@ class _RidesScreenState extends State<RidesScreen> {
       pos.longitude,
     );
     if (result['success'] != true && mounted) {
-      _handleStopEventError(result, provider);
+      await _handleStopEventError(
+        result,
+        provider,
+        route['route_id'].toString(),
+      );
     }
   }
 
@@ -3747,11 +3920,12 @@ class _RidesScreenState extends State<RidesScreen> {
       context,
       listen: false,
     );
-    final pos = await locationProvider.getCurrentLocation();
-    if (pos == null) {
-      if (mounted) _showErrorDialog('Location not valid');
+    final locationResult = await locationProvider.getFreshActionLocation();
+    if (!locationResult.isValid) {
+      if (mounted) _showErrorDialog(locationResult.message);
       return;
     }
+    final pos = locationResult.position!;
     final result = await provider.dropTrip(
       route['route_id'].toString(),
       stop['booking_id'].toString(),
@@ -3760,17 +3934,22 @@ class _RidesScreenState extends State<RidesScreen> {
       pos.longitude,
     );
     if (result['success'] != true && mounted) {
-      _handleStopEventError(result, provider);
+      await _handleStopEventError(
+        result,
+        provider,
+        route['route_id'].toString(),
+      );
     }
   }
 
   /// Shared error handler for pickup and drop failures.
   /// Uses [errorCode] to decide the UX action; always displays the backend's
   /// own [message] string — nothing is hardcoded here.
-  void _handleStopEventError(
+  Future<void> _handleStopEventError(
     Map<String, dynamic> result,
     BookingProvider provider,
-  ) {
+    String routeId,
+  ) async {
     final String message =
         result['error']?.toString() ??
         'Something went wrong. Please try again.';
@@ -3799,25 +3978,18 @@ class _RidesScreenState extends State<RidesScreen> {
           ),
         );
         // Silently refresh so the UI reflects the already-recorded state.
-        provider.fetchTrips(status: 'ongoing', showLoading: false);
+        await provider.refreshTripsAfterStateUpdate(showLoading: false);
         break;
 
       case 'ROUTE_NOT_FOUND':
       case 'BOOKING_NOT_IN_ROUTE':
         // Error dialog + silent background refresh.
         _showErrorDialog(message);
-        provider.fetchTrips(status: 'ongoing', showLoading: false);
+        await provider.refreshTripsAfterStateUpdate(showLoading: false);
         break;
 
       case 'ROUTE_NOT_ONGOING':
-        // Stop the old route immediately; the ongoing refresh will install a
-        // replacement route if the driver has already been assigned one.
-        Provider.of<LocationProvider>(
-          context,
-          listen: false,
-        ).setActiveRoute(null);
-        provider.fetchTrips(status: 'ongoing', showLoading: false);
-        _showErrorDialog(message);
+        await _showDutyNotActiveDialog();
         break;
 
       case 'INVALID_BOARDING_OTP':
@@ -3827,8 +3999,12 @@ class _RidesScreenState extends State<RidesScreen> {
         _showInvalidOtpDialog();
         break;
 
-      // All other error codes (PICKUP_REQUIRED, ROUTE_NOT_ONGOING,
-      // ESCORT_NOT_BOARDED, PREVIOUS_BOOKINGS_PENDING, DARK_HOUR_NO_ESCORT,
+      case 'ESCORT_NOT_BOARDED':
+        _showEscortRequiredDialog(routeId, provider, message);
+        break;
+
+      // All other error codes (PICKUP_REQUIRED,
+      // PREVIOUS_BOOKINGS_PENDING, DARK_HOUR_NO_ESCORT,
       // DRIVER_TOO_FAR_FROM_PICKUP, DRIVER_TOO_FAR_FROM_DROP, etc.) — pass
       // the backend message straight to the shared error dialog.
       default:
@@ -4058,7 +4234,7 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  Future<void> _showInvalidCodeDialog() async {
+  Future<void> _showInvalidCodeDialog([String? message]) async {
     return showDialog(
       context: context,
       builder: (c) => AlertDialog(
@@ -4071,7 +4247,7 @@ class _RidesScreenState extends State<RidesScreen> {
           ),
         ),
         content: Text(
-          'The code you entered is incorrect. Please try again.',
+          message ?? 'The code you entered is incorrect. Please try again.',
           style: GoogleFonts.poppins(fontSize: 13.5),
         ),
         actions: [
@@ -4097,6 +4273,207 @@ class _RidesScreenState extends State<RidesScreen> {
         lower.contains('distance') ||
         lower.contains('meters') ||
         lower.contains('location') && lower.contains('far');
+  }
+
+  Future<void> _showDutyNotActiveDialog() async {
+    return showDialog(
+      context: context,
+      builder: (c) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 60,
+                    height: 60,
+                    decoration: const BoxDecoration(
+                      color: _C.blueBg,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.route_outlined,
+                      color: _C.blue,
+                      size: 30,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Duty Not Active',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 17,
+                    color: _C.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  "Your duty isn't active right now. Start a duty to begin or continue a route.",
+                  style: GoogleFonts.poppins(
+                    fontSize: 13.5,
+                    color: _C.textSecondary,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 22),
+                SizedBox(
+                  height: 48,
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(c),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _C.blue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'Dismiss',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showEscortRequiredDialog(
+    String routeId,
+    BookingProvider provider,
+    String message,
+  ) async {
+    return showDialog(
+      context: context,
+      builder: (c) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 60,
+                    height: 60,
+                    decoration: const BoxDecoration(
+                      color: _C.tealBg,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.shield_outlined,
+                      color: _C.teal,
+                      size: 30,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Escort Boarding Required',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 17,
+                    color: _C.textPrimary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  message,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13.5,
+                    color: _C.textSecondary,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 22),
+                SizedBox(
+                  height: 48,
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(c);
+                      _handleEscortBoard(routeId, provider);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _C.teal,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'Board Escort Now',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 48,
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(c),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: _C.border),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'Dismiss',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13.5,
+                          color: _C.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _showErrorDialog(String message) async {
@@ -4216,11 +4593,20 @@ class _RidesScreenState extends State<RidesScreen> {
     );
   }
 
-  Future<String?> _showOtpDialog(BuildContext context, String name) async {
+  Future<String?> _showOtpDialog(
+    BuildContext context,
+    String name, {
+    int minLength = 4,
+    int maxLength = 4,
+  }) async {
     return showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (c) => OtpDialogContent(employeeName: name),
+      builder: (c) => OtpDialogContent(
+        employeeName: name,
+        minLength: minLength,
+        maxLength: maxLength,
+      ),
     );
   }
 
@@ -4245,21 +4631,59 @@ class _RidesScreenState extends State<RidesScreen> {
     }
   }
 
+  String _normalizedAddress(dynamic value) {
+    final text = value?.toString().trim() ?? '';
+    return text.replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+  }
+
+  bool _sameCoordinates(
+    dynamic firstLat,
+    dynamic firstLng,
+    dynamic secondLat,
+    dynamic secondLng,
+  ) {
+    final double? aLat = firstLat is num
+        ? firstLat.toDouble()
+        : double.tryParse(firstLat?.toString() ?? '');
+    final double? aLng = firstLng is num
+        ? firstLng.toDouble()
+        : double.tryParse(firstLng?.toString() ?? '');
+    final double? bLat = secondLat is num
+        ? secondLat.toDouble()
+        : double.tryParse(secondLat?.toString() ?? '');
+    final double? bLng = secondLng is num
+        ? secondLng.toDouble()
+        : double.tryParse(secondLng?.toString() ?? '');
+    if (aLat == null || aLng == null || bLat == null || bLng == null) {
+      return false;
+    }
+    return (aLat - bLat).abs() < 0.00005 && (aLng - bLng).abs() < 0.00005;
+  }
+
   String _formatTime(String timeStr) {
-    if (timeStr.isEmpty) return 'N/A';
-    try {
-      final parts = timeStr.split(':');
-      if (parts.length >= 2) {
-        final hour = int.parse(parts[0]);
-        final min = parts[1];
+    if (timeStr.trim().isEmpty) return 'N/A';
+    final value = timeStr.trim();
+
+    final parsed = DateTime.tryParse(value);
+    if (parsed != null) {
+      final local = parsed.toLocal();
+      final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+      final minute = local.minute.toString().padLeft(2, '0');
+      final ampm = local.hour >= 12 ? 'PM' : 'AM';
+      return '$hour:$minute $ampm';
+    }
+
+    final parts = value.split(':');
+    if (parts.length >= 2) {
+      final hour = int.tryParse(parts[0]);
+      final minute = parts[1].split('.').first.padLeft(2, '0');
+      if (hour != null && hour >= 0 && hour < 24) {
         final ampm = hour >= 12 ? 'PM' : 'AM';
         final displayHour = hour % 12 == 0 ? 12 : hour % 12;
-        return '$displayHour:$min $ampm';
+        return '$displayHour:$minute $ampm';
       }
-      return timeStr;
-    } catch (_) {
-      return timeStr;
     }
+    return value;
   }
 
   String _stopEta(dynamic stop, dynamic route) {
@@ -4275,7 +4699,15 @@ class _RidesScreenState extends State<RidesScreen> {
 
 class OtpDialogContent extends StatefulWidget {
   final String employeeName;
-  const OtpDialogContent({super.key, required this.employeeName});
+  final int minLength;
+  final int maxLength;
+
+  const OtpDialogContent({
+    super.key,
+    required this.employeeName,
+    this.minLength = 4,
+    this.maxLength = 4,
+  });
 
   @override
   State<OtpDialogContent> createState() => _OtpDialogContentState();
@@ -4308,7 +4740,11 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
   @override
   Widget build(BuildContext context) {
     final String otp = _controller.text;
-    final bool isComplete = otp.length == 4;
+    final bool isComplete =
+        otp.length >= widget.minLength && otp.length <= widget.maxLength;
+    final double boxWidth = widget.maxLength > 4 ? 40 : 52;
+    final double boxesWidth =
+        widget.maxLength * boxWidth + (widget.maxLength - 1) * 10;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -4365,13 +4801,13 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
                     Opacity(
                       opacity: 0.0,
                       child: SizedBox(
-                        width: 240,
+                        width: boxesWidth,
                         height: 56,
                         child: TextField(
                           controller: _controller,
                           focusNode: _focusNode,
                           keyboardType: TextInputType.number,
-                          maxLength: 4,
+                          maxLength: widget.maxLength,
                           enableInteractiveSelection: false,
                           onChanged: (_) => setState(() {}),
                         ),
@@ -4380,14 +4816,14 @@ class _OtpDialogContentState extends State<OtpDialogContent> {
                     IgnorePointer(
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: List.generate(4, (index) {
+                        children: List.generate(widget.maxLength, (index) {
                           final bool isFocused =
                               otp.length == index && _focusNode.hasFocus;
                           final bool hasValue = otp.length > index;
                           final String digit = hasValue ? otp[index] : '';
 
                           return Container(
-                            width: 52,
+                            width: boxWidth,
                             height: 56,
                             decoration: BoxDecoration(
                               color: const Color(0xFFF8FAFC),

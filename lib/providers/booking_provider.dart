@@ -12,6 +12,11 @@ import '../models/driver_current_state.dart';
 class BookingProvider extends ChangeNotifier {
   final RouteService _routeService = RouteService();
 
+  static const String _dutyNotActiveMessage =
+      'Route must be in ONGOING state. Please start duty first.';
+
+  Future<void>? _routeRefreshInFlight;
+
   List<dynamic> _routes = [];
   List<dynamic> _bookings = [];
   bool _isLoading = false;
@@ -65,6 +70,7 @@ class BookingProvider extends ChangeNotifier {
       final result = await _routeService.getDriverTrips(statusFilter: status);
       if (result['success'] == true) {
         _routes = result['routes'] ?? [];
+        _error = null;
         if (status == 'ongoing') {
           await LocationService().syncActiveRouteFromRoutes(_routes);
         }
@@ -100,14 +106,55 @@ class BookingProvider extends ChangeNotifier {
           NavigationService.navigateTo('/login');
           return;
         }
-        if (showLoading) _error = result['error'];
+        _error = result['error'];
       }
     } catch (e) {
-      if (showLoading) _error = 'Unable to load routes. Please try again.';
+      _error = 'Unable to load routes. Please try again.';
     } finally {
       if (showLoading) {
         _isLoading = false;
       }
+      notifyListeners();
+    }
+  }
+
+  Future<void> refreshTripsAfterStateUpdate({
+    bool showLoading = true,
+    bool skipSafetyCatch = false,
+  }) {
+    final inFlight = _routeRefreshInFlight;
+    if (inFlight != null) return inFlight;
+
+    final refresh = _performRouteRefresh(
+      showLoading: showLoading,
+      skipSafetyCatch: skipSafetyCatch,
+    );
+    _routeRefreshInFlight = refresh;
+    return refresh.whenComplete(() {
+      _routeRefreshInFlight = null;
+    });
+  }
+
+  Future<void> _performRouteRefresh({
+    required bool showLoading,
+    required bool skipSafetyCatch,
+  }) async {
+    final stateUpdated = await refreshCurrentState();
+
+    await fetchTrips(
+      status: 'ongoing',
+      showLoading: showLoading,
+      skipSafetyCatch: skipSafetyCatch,
+    );
+    if (_routes.isEmpty) {
+      await fetchTrips(status: 'upcoming', showLoading: showLoading);
+    }
+
+    if (_routes.isEmpty &&
+        _error == null &&
+        stateUpdated &&
+        _currentState?.dutyStatus == 'NOT_ON_DUTY') {
+      _error = _dutyNotActiveMessage;
       notifyListeners();
     }
   }
@@ -429,8 +476,7 @@ class BookingProvider extends ChangeNotifier {
     try {
       final result = await action();
       if (result['success'] == true) {
-        await fetchTrips(status: 'ongoing'); // Refresh
-        await refreshCurrentState();
+        await refreshTripsAfterStateUpdate(showLoading: false);
       } else {
         _error = result['error'];
       }

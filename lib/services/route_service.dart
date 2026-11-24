@@ -8,6 +8,11 @@ class RouteService {
   final Dio _dio = ApiClient().client;
   final Logger _logger = Logger();
 
+  static const String _escortNotBoardedBackendMessage =
+      'Escort must be boarded before picking up employees. Use POST /driver/escort/board first.';
+  static const String _escortNotBoardedFriendlyMessage =
+      'Please board the security escort first before picking up passengers.';
+
   // Singleton
   static final RouteService _instance = RouteService._internal();
   factory RouteService() => _instance;
@@ -360,6 +365,7 @@ class RouteService {
   Map<String, dynamic> _handleError(DioException e) {
     String error = 'Network error';
     String? errorCode;
+    Map? backendDetails;
 
     final status = e.response?.statusCode;
 
@@ -398,24 +404,53 @@ class RouteService {
     if (e.response?.data != null) {
       final data = e.response?.data;
       if (data is Map) {
-        if (data.containsKey('detail')) {
-          final detail = data['detail'];
-          if (detail is List) {
-            error = detail
-                .map((e) => "${e['loc']?.last}: ${e['msg']}")
-                .join(', ');
-          } else if (detail is Map) {
-            error = detail['message'] ?? error;
-          } else if (detail is String && detail.isNotEmpty) {
-            error = detail;
+        final detail = data['detail'];
+        if (detail is List) {
+          error = detail
+              .map((item) => "${item['loc']?.last}: ${item['msg']}")
+              .join(', ');
+        } else if (detail is Map) {
+          error = detail['message']?.toString() ?? error;
+          errorCode =
+              detail['error_code']?.toString() ??
+              detail['code']?.toString() ??
+              errorCode;
+          if (detail['details'] is Map) {
+            backendDetails = detail['details'] as Map;
           }
+        } else if (detail is String && detail.isNotEmpty) {
+          error = detail;
         } else {
           final msg = data['message'] ?? data['error'];
           if (msg is String && msg.isNotEmpty) error = msg;
         }
-        errorCode = data['code'] ?? data['error_code'] ?? errorCode;
+        errorCode =
+            data['error_code']?.toString() ??
+            data['code']?.toString() ??
+            errorCode;
+        if (data['details'] is Map) {
+          backendDetails ??= data['details'] as Map;
+        }
       }
     }
+
+    final String originalBackendMessage = error;
+    if (errorCode == 'ESCORT_NOT_BOARDED' ||
+        originalBackendMessage == _escortNotBoardedBackendMessage) {
+      _logger.w(
+        'RouteService: ESCORT_NOT_BOARDED backend error '
+        'message=$originalBackendMessage, errorCode=$errorCode, '
+        'details=$backendDetails',
+      );
+      error = _escortNotBoardedFriendlyMessage;
+    }
+
+    _logger.w(
+      'RouteService: HTTP $status ${e.requestOptions.method} '
+      '${e.requestOptions.path} → errorCode=$errorCode, message=$error, '
+      'details=$backendDetails',
+    );
+
     return {'success': false, 'error': error, 'errorCode': errorCode};
   }
 }

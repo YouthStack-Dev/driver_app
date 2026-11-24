@@ -6,6 +6,75 @@ import '../services/location_repository.dart'; // Ensure repository is loaded/in
 import '../services/session_service.dart';
 import '../services/driver_config_service.dart';
 import '../services/speed_violation_service.dart';
+import '../config/constants.dart';
+
+enum ActionLocationIssue {
+  none,
+  serviceDisabled,
+  permissionDenied,
+  unavailable,
+  stale,
+  inaccurate,
+}
+
+class ActionLocationResult {
+  final Position? position;
+  final ActionLocationIssue issue;
+  final String message;
+
+  const ActionLocationResult._({
+    this.position,
+    required this.issue,
+    required this.message,
+  });
+
+  bool get isValid => issue == ActionLocationIssue.none && position != null;
+
+  factory ActionLocationResult.success(Position position) {
+    return ActionLocationResult._(
+      position: position,
+      issue: ActionLocationIssue.none,
+      message: '',
+    );
+  }
+
+  factory ActionLocationResult.failure(
+    ActionLocationIssue issue,
+    String message,
+  ) {
+    return ActionLocationResult._(issue: issue, message: message);
+  }
+}
+
+ActionLocationIssue validateActionPosition(
+  Position position, {
+  DateTime? now,
+  Duration maxAge = const Duration(
+    seconds: LocationConfig.maxActionLocationAgeSeconds,
+  ),
+  double maxAccuracyMeters = LocationConfig.maxActionLocationAccuracyMeters,
+}) {
+  if (!position.latitude.isFinite ||
+      !position.longitude.isFinite ||
+      position.latitude.abs() > 90 ||
+      position.longitude.abs() > 180) {
+    return ActionLocationIssue.unavailable;
+  }
+
+  final age = (now ?? DateTime.now()).difference(position.timestamp);
+  if (age > maxAge || age < const Duration(seconds: -5)) {
+    return ActionLocationIssue.stale;
+  }
+
+  if (!position.accuracy.isFinite || position.accuracy <= 0) {
+    return ActionLocationIssue.unavailable;
+  }
+  if (position.accuracy > maxAccuracyMeters) {
+    return ActionLocationIssue.inaccurate;
+  }
+
+  return ActionLocationIssue.none;
+}
 
 class LocationProvider extends ChangeNotifier {
   final LocationService _locationService = LocationService();
@@ -32,43 +101,48 @@ class LocationProvider extends ChangeNotifier {
 
   LocationProvider() {
     // Seed initial position from last known location
-    Geolocator.getLastKnownPosition().then((pos) {
-      if (pos != null && _lastPosition == null) {
-        _lastPosition = pos;
-        notifyListeners();
-      }
-    }).catchError((_) {});
+    Geolocator.getLastKnownPosition()
+        .then((pos) {
+          if (pos != null && _lastPosition == null) {
+            _lastPosition = pos;
+            notifyListeners();
+          }
+        })
+        .catchError((_) {});
 
     // Fast fallback check
     Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.low,
-      ),
-    ).then((pos) {
-      if (_lastPosition == null) {
-        _lastPosition = pos;
-        notifyListeners();
-      }
-    }).catchError((_) {});
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.low,
+          ),
+        )
+        .then((pos) {
+          if (_lastPosition == null) {
+            _lastPosition = pos;
+            notifyListeners();
+          }
+        })
+        .catchError((_) {});
 
     // Initialize the LocationRepository singleton so it subscribes to positionStream
     LocationRepository();
 
     // Listen to GPS positions
-    _positionSubscription =
-        _locationService.positionStream.listen(_onPosition);
+    _positionSubscription = _locationService.positionStream.listen(_onPosition);
 
     // Listen to tracking start/stop so the HUD appears immediately when
     // AuthProvider starts tracking (without waiting for first GPS fix)
-    _trackingStateSubscription =
-        _locationService.trackingStateStream.listen((_) {
+    _trackingStateSubscription = _locationService.trackingStateStream.listen((
+      _,
+    ) {
       notifyListeners();
     });
 
     // Listen to permission changes
     _hasGpsPermission = _locationService.hasPermission;
-    _permissionSubscription =
-        _locationService.permissionStateStream.listen((hasPerm) {
+    _permissionSubscription = _locationService.permissionStateStream.listen((
+      hasPerm,
+    ) {
       _hasGpsPermission = hasPerm;
       notifyListeners();
     });
@@ -90,13 +164,17 @@ class LocationProvider extends ChangeNotifier {
       final activeRouteId = await SessionService().getActiveRoute();
       final activeVehicleId = await SessionService().getActiveVehicle();
       if (activeRouteId != null && activeRouteId.isNotEmpty) {
-        debugPrint('🔄 LocationProvider: Restoring active route state: $activeRouteId, vehicle: $activeVehicleId');
+        debugPrint(
+          '🔄 LocationProvider: Restoring active route state: $activeRouteId, vehicle: $activeVehicleId',
+        );
         _locationService.activeRouteId = activeRouteId;
         _locationService.activeVehicleId = activeVehicleId;
         notifyListeners();
       }
     } catch (e) {
-      debugPrint('⚠️ LocationProvider: Failed to restore active route state: $e');
+      debugPrint(
+        '⚠️ LocationProvider: Failed to restore active route state: $e',
+      );
     }
   }
 
@@ -156,6 +234,70 @@ class LocationProvider extends ChangeNotifier {
       );
     } catch (_) {
       return null;
+    }
+  }
+
+  Future<ActionLocationResult> getFreshActionLocation() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return ActionLocationResult.failure(
+        ActionLocationIssue.serviceDisabled,
+        'Location services are turned off. Turn them on to verify the stop, then try again.',
+      );
+    }
+
+    final permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return ActionLocationResult.failure(
+        ActionLocationIssue.permissionDenied,
+        'Location permission is required to verify the stop. Enable precise location access for the app, then try again.',
+      );
+    }
+
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(
+            seconds: LocationConfig.actionLocationTimeoutSeconds,
+          ),
+        ),
+      );
+
+      final issue = validateActionPosition(position);
+      if (issue == ActionLocationIssue.stale) {
+        return ActionLocationResult.failure(
+          issue,
+          'Location fix is stale. Wait for a fresh GPS fix, then try again.',
+        );
+      }
+      if (issue == ActionLocationIssue.inaccurate) {
+        return ActionLocationResult.failure(
+          issue,
+          'GPS accuracy is too low (${position.accuracy.toStringAsFixed(0)} m). Wait for a better GPS fix, then try again.',
+        );
+      }
+      if (issue != ActionLocationIssue.none) {
+        return ActionLocationResult.failure(
+          issue,
+          'Unable to get a valid location. Move to an open area or improve GPS signal, then try again.',
+        );
+      }
+
+      _lastPosition = position;
+      notifyListeners();
+      return ActionLocationResult.success(position);
+    } on TimeoutException {
+      return ActionLocationResult.failure(
+        ActionLocationIssue.unavailable,
+        'Unable to get a fresh GPS fix. Move to an open area or improve GPS signal, then try again.',
+      );
+    } catch (_) {
+      return ActionLocationResult.failure(
+        ActionLocationIssue.unavailable,
+        'Unable to get a fresh GPS fix. Move to an open area or improve GPS signal, then try again.',
+      );
     }
   }
 

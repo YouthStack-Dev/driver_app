@@ -10,18 +10,19 @@ class ApiEndpoints {
   static const String logout = '/api/v1/logout';
   static const String driverTrips = '/api/v1/driver/trips';
   static const String driverHistoryReport = '/api/v1/driver/history/report';
-  
+
   // Duty Management
   static const String dutyStart = '/api/v1/driver/duty/start';
   static const String dutyEnd = '/api/v1/driver/duty/end';
-  
+
   // Trip Operations
   static const String tripStart = '/api/v1/driver/trip/start';
-  static const String tripEnd = '/api/v1/driver/trip/drop'; // Fix: consistent naming
+  static const String tripEnd =
+      '/api/v1/driver/trip/drop'; // Fix: consistent naming
   static const String noShow = '/api/v1/driver/trip/no-show';
-  
+
   static const String bookings = '/api/v1/bookings/employee';
-  static const String bookingDetails = '/api/v1/bookings'; 
+  static const String bookingDetails = '/api/v1/bookings';
   static const String weekoffConfig = '/api/v1/weekoff-configs';
   static const String shifts = '/api/v1/shifts';
   static const String createBooking = '/api/v1/bookings';
@@ -67,7 +68,8 @@ class ApiEndpoints {
 }
 
 class FirebaseConfig {
-  static const String databaseUrl = 'https://ets-1-ccb71-default-rtdb.firebaseio.com';
+  static const String databaseUrl =
+      'https://ets-1-ccb71-default-rtdb.firebaseio.com';
 }
 
 class LocationConfig {
@@ -80,4 +82,8 @@ class LocationConfig {
   /// How often a location ping is sent to POST /driver/location while ONGOING.
   /// Spec: every 5–10 s. Using 7 s as the midpoint.
   static const int locationPingIntervalMs = 7000;
+
+  static const int actionLocationTimeoutSeconds = 10;
+  static const int maxActionLocationAgeSeconds = 10;
+  static const double maxActionLocationAccuracyMeters = 100;
 }
