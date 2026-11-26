@@ -9,6 +9,7 @@ import 'api_client.dart';
 ///   POST /api/v1/driver/chat/{booking_id}/send       → send message
 ///   GET  /api/v1/driver/chat/{booking_id}/messages   → paginated history
 ///   POST /api/v1/driver/chat/{booking_id}/language   → set preferred language
+///   POST /api/v1/driver/chat/{booking_id}/translate  → translate one message
 ///   GET  /api/v1/chat/supported-languages            → public, no token needed
 class ChatService {
   static final ChatService _instance = ChatService._internal();
@@ -73,6 +74,30 @@ class ChatService {
     }
   }
 
+  Future<Map<String, dynamic>> translateMessage(
+    int bookingId, {
+    int? messageId,
+    String? firebaseMessageId,
+    String? sourceLanguage,
+    required String targetLanguage,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/api/v1/driver/chat/$bookingId/translate',
+        data: {
+          'message_id': ?messageId,
+          'firebase_message_id': ?firebaseMessageId,
+          'target_language': targetLanguage,
+          'source_language': ?sourceLanguage,
+        },
+      );
+      return {'success': true, 'data': response.data['data']};
+    } on DioException catch (e) {
+      _logger.e('ChatService.translateMessage', error: e);
+      return {'success': false, 'error': _extractError(e)};
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Language
   // ---------------------------------------------------------------------------
@@ -103,8 +128,7 @@ class ChatService {
   /// This endpoint is public — no auth token is required.
   Future<Map<String, dynamic>> getSupportedLanguages() async {
     try {
-      final response =
-          await _dio.get('/api/v1/chat/supported-languages');
+      final response = await _dio.get('/api/v1/chat/supported-languages');
       return {'success': true, 'data': response.data['data']};
     } on DioException catch (e) {
       _logger.e('ChatService.getSupportedLanguages', error: e);
@@ -120,9 +144,9 @@ class ChatService {
     final data = e.response?.data;
     if (data is Map) {
       return (data['detail'] ?? data['message'] ?? data['error'] ?? '')
-          .toString()
-          .trim()
-          .isNotEmpty
+              .toString()
+              .trim()
+              .isNotEmpty
           ? (data['detail'] ?? data['message'] ?? data['error']).toString()
           : 'HTTP ${e.response?.statusCode ?? 'error'}';
     }

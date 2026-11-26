@@ -426,12 +426,16 @@ class _ChatScreenState extends State<ChatScreen> {
       itemBuilder: (context, index) {
         final msg = provider.messages[index];
         final prevMsg = index > 0 ? provider.messages[index - 1] : null;
-        return _buildMessageBubble(msg, prevMsg);
+        return _buildMessageBubble(msg, prevMsg, provider);
       },
     );
   }
 
-  Widget _buildMessageBubble(Map<String, dynamic> msg, Map<String, dynamic>? prevMsg) {
+  Widget _buildMessageBubble(
+    Map<String, dynamic> msg,
+    Map<String, dynamic>? prevMsg,
+    ChatProvider provider,
+  ) {
     final senderType = (msg['sender_type'] as String?) ?? 'system';
     final isSystem = (msg['is_system_message'] as bool?) ?? (senderType == 'system');
 
@@ -475,6 +479,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: GoogleFonts.poppins(fontSize: 9, color: Colors.grey.shade400, fontWeight: FontWeight.w500),
                   ),
                 ),
+                if (!isSystem) _buildTranslationAction(msg, provider),
               ],
             ),
           ),
@@ -482,6 +487,107 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildTranslationAction(
+    Map<String, dynamic> msg,
+    ChatProvider provider,
+  ) {
+    if (chatTranslationIdentity(msg) == null) return const SizedBox.shrink();
+
+    final isTranslating = provider.isMessageTranslating(msg);
+    final error = provider.messageTranslationError(msg);
+    final status = provider.messageTranslationStatus(msg);
+    final languageName = provider.supportedLanguages[provider.driverLanguage];
+    final label = isTranslating
+        ? 'Translating...'
+        : languageName == null
+        ? 'Translate'
+        : 'Translate to $languageName';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Column(
+        crossAxisAlignment: (msg['sender_type'] as String?) == 'driver'
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          if (error != null && error.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                error,
+                style: GoogleFonts.poppins(
+                  fontSize: 9,
+                  color: Colors.red.shade500,
+                ),
+              ),
+            ),
+          if (error == null || error.isEmpty)
+            if (status == 'same_language' ||
+                status == 'unchanged' ||
+                status == 'empty' ||
+                status == 'disabled')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text(
+                  _translationStatusLabel(status),
+                  style: GoogleFonts.poppins(
+                    fontSize: 9,
+                    color: Colors.grey.shade400,
+                  ),
+                ),
+              ),
+          InkWell(
+            onTap: isTranslating
+                ? null
+                : () => provider.translateMessage(widget.bookingId, msg),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isTranslating)
+                    SizedBox(
+                      width: 11,
+                      height: 11,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: Colors.grey.shade400,
+                      ),
+                    )
+                  else
+                    Icon(
+                      Icons.translate_rounded,
+                      size: 11,
+                      color: Colors.grey.shade400,
+                    ),
+                  const SizedBox(width: 4),
+                  Text(
+                    error != null && error.isNotEmpty
+                        ? 'Retry translation'
+                        : label,
+                    style: GoogleFonts.poppins(
+                      fontSize: 9,
+                      color: Colors.grey.shade500,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _translationStatusLabel(String? status) {
+    if (status == 'same_language') return 'Already in selected language';
+    if (status == 'unchanged') return 'Translation unchanged';
+    if (status == 'empty') return 'No text to translate';
+    if (status == 'disabled') return 'Translation unavailable';
+    return '';
   }
 
   Widget _buildSystemMessage(Map<String, dynamic> msg, double topPadding) {
@@ -523,12 +629,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildBubble(Map<String, dynamic> msg, bool isDriver) {
-    final displayText = (msg['translated_text'] as String?)?.trim().isNotEmpty == true
-        ? (msg['translated_text'] as String)
-        : ((msg['original_text'] as String?) ?? '');
-
     final originalText = (msg['original_text'] as String?) ?? '';
-    final showOriginal = displayText != originalText && originalText.isNotEmpty;
+    final translatedText = (msg['translated_text'] as String?)?.trim();
+    final showTranslated =
+        translatedText != null &&
+        translatedText.isNotEmpty &&
+        translatedText != originalText.trim();
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -553,30 +659,33 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: isDriver ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           Text(
-            displayText,
+            originalText,
             style: GoogleFonts.poppins(
               color: isDriver ? Colors.white : const Color(0xFF1E293B),
               fontSize: 14,
               height: 1.45,
             ),
           ),
-          // Show original text with globe translation indicator
-          if (showOriginal) ...[
+          if (showTranslated) ...[
             const SizedBox(height: 6),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  Icons.g_translate_rounded, 
-                  size: 11, 
-                  color: isDriver ? Colors.white.withValues(alpha: 0.5) : Colors.grey.shade400
+                  Icons.g_translate_rounded,
+                  size: 11,
+                  color: isDriver
+                      ? Colors.white.withValues(alpha: 0.5)
+                      : Colors.grey.shade400,
                 ),
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(
-                    originalText,
+                    translatedText,
                     style: GoogleFonts.poppins(
-                      color: isDriver ? Colors.white.withValues(alpha: 0.6) : Colors.grey.shade400,
+                      color: isDriver
+                          ? Colors.white.withValues(alpha: 0.6)
+                          : Colors.grey.shade400,
                       fontSize: 11,
                       fontStyle: FontStyle.italic,
                       height: 1.3,
@@ -716,16 +825,5 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  String _formatTimestamp(String? iso) {
-    if (iso == null || iso.isEmpty) return '';
-    try {
-      final dt = DateTime.parse(iso).toLocal();
-      final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-      final m = dt.minute.toString().padLeft(2, '0');
-      final ap = dt.hour >= 12 ? 'PM' : 'AM';
-      return '$h:$m $ap';
-    } catch (_) {
-      return '';
-    }
-  }
+  String _formatTimestamp(String? iso) => formatChatTimestamp(iso);
 }
